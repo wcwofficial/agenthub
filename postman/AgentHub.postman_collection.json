@@ -21,6 +21,10 @@
     {
       "key": "targetAgentId",
       "value": ""
+    },
+    {
+      "key": "conversationId",
+      "value": ""
     }
   ],
   "item": [
@@ -36,7 +40,10 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
         ],
         "body": {
           "mode": "raw",
@@ -50,7 +57,10 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
         ],
         "body": {
           "mode": "raw",
@@ -78,7 +88,10 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
         ],
         "body": {
           "mode": "raw",
@@ -106,13 +119,64 @@
       "request": {
         "method": "POST",
         "header": [
-          { "key": "Content-Type", "value": "application/json" }
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
         ],
         "body": {
           "mode": "raw",
           "raw": "{\n  \"success\": true,\n  \"result\": \"Available tomorrow at 14:00\"\n}"
         },
         "url": "{{baseUrl}}/api/tasks/{{taskId}}/result"
+      }
+    },
+    {
+      "name": "Create conversation",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"participantAgentIds\": [\"{{agentId}}\", \"{{targetAgentId}}\"],\n  \"subject\": \"Need movers in Miami\"\n}"
+        },
+        "url": "{{baseUrl}}/api/conversations"
+      }
+    },
+    {
+      "name": "Get conversation",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/conversations/{{conversationId}}"
+      }
+    },
+    {
+      "name": "Send conversation message",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"fromAgentId\": \"{{agentId}}\",\n  \"body\": \"Need movers tomorrow morning in Miami. Are you available?\"\n}"
+        },
+        "url": "{{baseUrl}}/api/conversations/{{conversationId}}/messages"
+      }
+    },
+    {
+      "name": "Agent inbox",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/agents/{{agentId}}/inbox"
       }
     }
   ]

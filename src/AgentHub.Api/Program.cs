@@ -44,7 +44,7 @@ app.UseHttpsRedirection();
 app.MapGet("/", () => Results.Ok(new
 {
     name = "AgentHub API",
-    version = "0.2.0",
+    version = "0.3.0",
     persistence = string.IsNullOrWhiteSpace(connectionString) ? "InMemory" : "PostgreSQL",
     docs = "/swagger",
     features = new[]
@@ -53,7 +53,8 @@ app.MapGet("/", () => Results.Ok(new
         "Searchable provider directory",
         "Task creation",
         "Agent polling inbox",
-        "Task result submission"
+        "Task result submission",
+        "Conversation threads"
     }
 })).WithOpenApi();
 
@@ -293,6 +294,92 @@ app.MapPost("/api/tasks/{id:guid}/result", async (Guid id, SubmitTaskResultReque
     return Results.Ok(ToTaskRecord(task));
 }).WithOpenApi();
 
+app.MapPost("/api/conversations", async (CreateConversationRequest request, AgentHubDbContext db) =>
+{
+    if (request.ParticipantAgentIds is null || request.ParticipantAgentIds.Length < 2)
+        return Results.BadRequest(new { error = "at least two participantAgentIds are required" });
+
+    var participantIds = request.ParticipantAgentIds.Distinct().ToArray();
+    var existingAgentCount = await db.Agents.CountAsync(a => participantIds.Contains(a.Id));
+    if (existingAgentCount != participantIds.Length)
+        return Results.BadRequest(new { error = "one or more participant agents do not exist" });
+
+    var conversation = new ConversationEntity
+    {
+        Id = Guid.NewGuid(),
+        Subject = request.Subject?.Trim(),
+        ParticipantAgentIds = JoinGuidList(participantIds),
+        CreatedAtUtc = DateTimeOffset.UtcNow
+    };
+
+    db.Conversations.Add(conversation);
+    await db.SaveChangesAsync();
+
+    return Results.Ok(ToConversationRecord(conversation, []));
+}).WithOpenApi();
+
+app.MapGet("/api/conversations/{id:guid}", async (Guid id, AgentHubDbContext db) =>
+{
+    var conversation = await db.Conversations.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id);
+    if (conversation is null)
+        return Results.NotFound(new { error = "conversation not found" });
+
+    var messages = await db.Messages.AsNoTracking()
+        .Where(m => m.ConversationId == id)
+        .OrderBy(m => m.CreatedAtUtc)
+        .ToListAsync();
+
+    return Results.Ok(ToConversationRecord(conversation, messages));
+}).WithOpenApi();
+
+app.MapPost("/api/conversations/{id:guid}/messages", async (Guid id, CreateMessageRequest request, AgentHubDbContext db) =>
+{
+    var conversation = await db.Conversations.FirstOrDefaultAsync(c => c.Id == id);
+    if (conversation is null)
+        return Results.NotFound(new { error = "conversation not found" });
+
+    var participantIds = SplitGuidList(conversation.ParticipantAgentIds);
+    if (!participantIds.Contains(request.FromAgentId))
+        return Results.BadRequest(new { error = "fromAgentId is not a participant of this conversation" });
+
+    if (string.IsNullOrWhiteSpace(request.Body))
+        return Results.BadRequest(new { error = "body is required" });
+
+    var message = new MessageEntity
+    {
+        Id = Guid.NewGuid(),
+        ConversationId = id,
+        FromAgentId = request.FromAgentId,
+        Body = request.Body.Trim(),
+        CreatedAtUtc = DateTimeOffset.UtcNow
+    };
+
+    db.Messages.Add(message);
+    await db.SaveChangesAsync();
+
+    return Results.Ok(ToMessageRecord(message));
+}).WithOpenApi();
+
+app.MapGet("/api/agents/{id:guid}/inbox", async (Guid id, AgentHubDbContext db) =>
+{
+    var agentExists = await db.Agents.AsNoTracking().AnyAsync(a => a.Id == id);
+    if (!agentExists)
+        return Results.NotFound(new { error = "agent not found" });
+
+    var conversations = await db.Conversations.AsNoTracking()
+        .Where(c => c.ParticipantAgentIds.Contains(id.ToString()))
+        .OrderByDescending(c => c.CreatedAtUtc)
+        .ToListAsync();
+
+    var messages = await db.Messages.AsNoTracking()
+        .Where(m => conversations.Select(c => c.Id).Contains(m.ConversationId))
+        .OrderBy(m => m.CreatedAtUtc)
+        .ToListAsync();
+
+    var result = conversations.Select(c => ToConversationRecord(c, messages.Where(m => m.ConversationId == c.Id).ToList())).ToArray();
+    return Results.Ok(result);
+}).WithOpenApi();
+
 app.Run();
 
 static string[] NormalizeStrings(IEnumerable<string>? values) =>
@@ -303,6 +390,8 @@ static string[] NormalizeStrings(IEnumerable<string>? values) =>
 
 static string JoinList(IEnumerable<string>? values) => string.Join('|', NormalizeStrings(values));
 static string[] SplitList(string? value) => string.IsNullOrWhiteSpace(value) ? [] : value.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+static string JoinGuidList(IEnumerable<Guid>? values) => string.Join('|', values?.Distinct() ?? []);
+static Guid[] SplitGuidList(string? value) => string.IsNullOrWhiteSpace(value) ? [] : value.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(Guid.Parse).ToArray();
 
 static PricingInfo? ToPricingInfo(AgentEntity agent) =>
     agent.PricingCurrency is null && agent.PricingAmount is null && agent.PricingNotes is null
@@ -339,6 +428,20 @@ static TaskRecord ToTaskRecord(TaskEntity task) => new(
     task.ClaimedAtUtc,
     task.CompletedAtUtc);
 
+static MessageRecord ToMessageRecord(MessageEntity message) => new(
+    message.Id,
+    message.ConversationId,
+    message.FromAgentId,
+    message.Body,
+    message.CreatedAtUtc);
+
+static ConversationRecord ToConversationRecord(ConversationEntity conversation, IEnumerable<MessageEntity> messages) => new(
+    conversation.Id,
+    conversation.Subject,
+    SplitGuidList(conversation.ParticipantAgentIds),
+    conversation.CreatedAtUtc,
+    messages.OrderBy(m => m.CreatedAtUtc).Select(ToMessageRecord).ToArray());
+
 public record RegisterAgentRequest(
     string Name,
     string[] Roles,
@@ -371,6 +474,8 @@ public record CreateTaskRequest(
     decimal? Budget);
 
 public record SubmitTaskResultRequest(bool Success, string? Result);
+public record CreateConversationRequest(Guid[] ParticipantAgentIds, string? Subject);
+public record CreateMessageRequest(Guid FromAgentId, string Body);
 public record PricingInfo(string? Currency, decimal? Amount, string? Notes);
 
 public record AgentRecord(
@@ -417,6 +522,20 @@ public record TaskRecord(
     DateTimeOffset? ClaimedAtUtc,
     DateTimeOffset? CompletedAtUtc);
 
+public record ConversationRecord(
+    Guid Id,
+    string? Subject,
+    Guid[] ParticipantAgentIds,
+    DateTimeOffset CreatedAtUtc,
+    MessageRecord[] Messages);
+
+public record MessageRecord(
+    Guid Id,
+    Guid ConversationId,
+    Guid FromAgentId,
+    string Body,
+    DateTimeOffset CreatedAtUtc);
+
 public class AgentEntity
 {
     public Guid Id { get; set; }
@@ -453,10 +572,29 @@ public class TaskEntity
     public DateTimeOffset? CompletedAtUtc { get; set; }
 }
 
+public class ConversationEntity
+{
+    public Guid Id { get; set; }
+    public string? Subject { get; set; }
+    public string ParticipantAgentIds { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAtUtc { get; set; }
+}
+
+public class MessageEntity
+{
+    public Guid Id { get; set; }
+    public Guid ConversationId { get; set; }
+    public Guid FromAgentId { get; set; }
+    public string Body { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAtUtc { get; set; }
+}
+
 public class AgentHubDbContext(DbContextOptions<AgentHubDbContext> options) : DbContext(options)
 {
     public DbSet<AgentEntity> Agents => Set<AgentEntity>();
     public DbSet<TaskEntity> Tasks => Set<TaskEntity>();
+    public DbSet<ConversationEntity> Conversations => Set<ConversationEntity>();
+    public DbSet<MessageEntity> Messages => Set<MessageEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -473,6 +611,18 @@ public class AgentHubDbContext(DbContextOptions<AgentHubDbContext> options) : Db
         {
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Title).IsRequired();
+        });
+
+        modelBuilder.Entity<ConversationEntity>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.ParticipantAgentIds).IsRequired();
+        });
+
+        modelBuilder.Entity<MessageEntity>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Body).IsRequired();
         });
     }
 }

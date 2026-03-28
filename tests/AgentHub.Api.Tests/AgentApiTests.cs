@@ -1,6 +1,5 @@
 using System.Net;
 using System.Net.Http.Json;
-using AgentHub.Api.Tests;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -137,10 +136,78 @@ public class AgentApiTests : IClassFixture<AgentHubApiFactory>
         Assert.Equal("Available tomorrow at 14:00", updatedTask.Result);
     }
 
+    [Fact]
+    public async Task MultipleAgents_CanSearchCreateConversation_AndExchangeMessages()
+    {
+        var seekerResponse = await _client.PostAsJsonAsync("/api/agents/register", new
+        {
+            name = "Finder Bot",
+            roles = new[] { "seeker" },
+            isSearchOnly = true,
+            skills = new[] { "vendor search" }
+        });
+        seekerResponse.EnsureSuccessStatusCode();
+        var seeker = await seekerResponse.Content.ReadFromJsonAsync<RegisterResponse>();
+
+        var providerResponse = await _client.PostAsJsonAsync("/api/agents/register", new
+        {
+            name = "Miami Movers Bot",
+            roles = new[] { "provider" },
+            location = "Miami",
+            skills = new[] { "moving", "loaders" }
+        });
+        providerResponse.EnsureSuccessStatusCode();
+        var provider = await providerResponse.Content.ReadFromJsonAsync<RegisterResponse>();
+
+        Assert.NotNull(seeker);
+        Assert.NotNull(provider);
+
+        var searchResponse = await _client.GetAsync("/api/agents/search?skill=loaders&location=Miami");
+        searchResponse.EnsureSuccessStatusCode();
+        var matches = await searchResponse.Content.ReadFromJsonAsync<List<SearchResponse>>();
+        Assert.NotNull(matches);
+        Assert.Contains(matches!, x => x.Id == provider!.Id);
+
+        var conversationResponse = await _client.PostAsJsonAsync("/api/conversations", new
+        {
+            participantAgentIds = new[] { seeker!.Id, provider!.Id },
+            subject = "Need movers in Miami"
+        });
+        conversationResponse.EnsureSuccessStatusCode();
+        var conversation = await conversationResponse.Content.ReadFromJsonAsync<ConversationResponse>();
+        Assert.NotNull(conversation);
+
+        var firstMessageResponse = await _client.PostAsJsonAsync($"/api/conversations/{conversation!.Id}/messages", new
+        {
+            fromAgentId = seeker.Id,
+            body = "Need movers tomorrow morning in Miami. Are you available?"
+        });
+        firstMessageResponse.EnsureSuccessStatusCode();
+
+        var secondMessageResponse = await _client.PostAsJsonAsync($"/api/conversations/{conversation.Id}/messages", new
+        {
+            fromAgentId = provider.Id,
+            body = "Yes, available after 10:00."
+        });
+        secondMessageResponse.EnsureSuccessStatusCode();
+
+        var inboxResponse = await _client.GetAsync($"/api/agents/{provider.Id}/inbox");
+        inboxResponse.EnsureSuccessStatusCode();
+        var inbox = await inboxResponse.Content.ReadFromJsonAsync<List<ConversationResponse>>();
+
+        Assert.NotNull(inbox);
+        var providerConversation = Assert.Single(inbox!);
+        Assert.Equal(2, providerConversation.Messages.Length);
+        Assert.Equal("Need movers tomorrow morning in Miami. Are you available?", providerConversation.Messages[0].Body);
+        Assert.Equal("Yes, available after 10:00.", providerConversation.Messages[1].Body);
+    }
+
     public sealed record RegisterResponse(Guid Id, string Name, string[] Roles, bool IsSearchOnly);
     public sealed record SearchResponse(Guid Id, string Name, string[] Roles, bool IsSearchOnly);
     public sealed record CreateTaskResponse(Guid Id, string Status, Guid TargetAgentId);
     public sealed record TaskResponse(Guid Id, Guid TargetAgentId, string Title, string Status, string? Result);
+    public sealed record ConversationResponse(Guid Id, string? Subject, Guid[] ParticipantAgentIds, MessageResponse[] Messages);
+    public sealed record MessageResponse(Guid Id, Guid ConversationId, Guid FromAgentId, string Body);
 }
 
 public class AgentHubApiFactory : WebApplicationFactory<Program>
