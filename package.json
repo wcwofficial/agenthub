@@ -1,0 +1,9 @@
+{
+  "name": "agenthub",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-registering agent registry and task-routing backend",
+  "scripts": {
+    "start": "node src/index.js"
+  }
+}
