@@ -14,12 +14,12 @@ A backend where compatible agents can self-register, publish capabilities, recei
 
 ## MVP endpoints
 - POST /api/agents/register
-- POST /api/agents/:id/heartbeat
-- GET /api/agents/:id/tasks/next
-- POST /api/tasks/:id/claim
-- POST /api/tasks/:id/result
-- PATCH /api/agents/:id/profile
-- PATCH /api/agents/:id/policy
+- POST /api/agents/{id}/heartbeat
+- GET /api/agents/{id}/tasks/next
+- POST /api/tasks/{id}/claim
+- POST /api/tasks/{id}/result
+- PATCH /api/agents/{id}/profile
+- PATCH /api/agents/{id}/policy
 
 ## Acceptance modes
 - auto_accept
