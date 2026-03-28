@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 
@@ -86,6 +87,7 @@ app.MapPost("/api/agents/register", async (RegisterAgentRequest request, AgentHu
         AcceptMode = request.AcceptMode ?? AcceptMode.AskOwnerFirst,
         IsSearchOnly = request.IsSearchOnly,
         ContactMode = request.ContactMode ?? ContactMode.Poll,
+        ApiKey = GenerateApiKey(),
         CreatedAtUtc = now,
         LastHeartbeatAtUtc = null
     };
@@ -99,6 +101,7 @@ app.MapPost("/api/agents/register", async (RegisterAgentRequest request, AgentHu
         agent.Name,
         Roles = SplitList(agent.Roles),
         agent.IsSearchOnly,
+        agent.ApiKey,
         message = "Agent registered successfully"
     });
 }).WithOpenApi();
@@ -191,8 +194,12 @@ app.MapPatch("/api/agents/{id:guid}/profile", async (Guid id, UpdateAgentProfile
     return Results.Ok(ToAgentRecord(agent));
 }).WithOpenApi();
 
-app.MapPost("/api/agents/{id:guid}/heartbeat", async (Guid id, AgentHubDbContext db) =>
+app.MapPost("/api/agents/{id:guid}/heartbeat", async (HttpContext http, Guid id, AgentHubDbContext db) =>
 {
+    var authResult = await RequireAgentAuth(http, db, id);
+    if (authResult is not null)
+        return authResult;
+
     var agent = await db.Agents.FirstOrDefaultAsync(a => a.Id == id);
     if (agent is null)
         return Results.NotFound(new { error = "agent not found" });
@@ -219,6 +226,12 @@ app.MapPost("/api/tasks", async (CreateTaskRequest request, AgentHubDbContext db
     var targetAgent = await db.Agents.AsNoTracking().FirstOrDefaultAsync(a => a.Id == request.TargetAgentId.Value);
     if (targetAgent is null)
         return Results.NotFound(new { error = "target agent not found" });
+
+    if (targetAgent.AcceptMode == AcceptMode.NeverAuto)
+        return Results.Conflict(new { error = "target agent does not accept tasks automatically" });
+
+    if (targetAgent.AcceptMode == AcceptMode.AskOwnerFirst)
+        return Results.Conflict(new { error = "target agent requires owner approval before accepting tasks" });
 
     if (string.IsNullOrWhiteSpace(request.Title))
         return Results.BadRequest(new { error = "title is required" });
@@ -248,8 +261,12 @@ app.MapPost("/api/tasks", async (CreateTaskRequest request, AgentHubDbContext db
     });
 }).WithOpenApi();
 
-app.MapGet("/api/agents/{id:guid}/tasks/next", async (Guid id, AgentHubDbContext db) =>
+app.MapGet("/api/agents/{id:guid}/tasks/next", async (HttpContext http, Guid id, AgentHubDbContext db) =>
 {
+    var authResult = await RequireAgentAuth(http, db, id);
+    if (authResult is not null)
+        return authResult;
+
     var agentExists = await db.Agents.AsNoTracking().AnyAsync(a => a.Id == id);
     if (!agentExists)
         return Results.NotFound(new { error = "agent not found" });
@@ -280,11 +297,15 @@ app.MapPost("/api/tasks/{id:guid}/claim", async (Guid id, AgentHubDbContext db) 
     return Results.Ok(ToTaskRecord(task));
 }).WithOpenApi();
 
-app.MapPost("/api/tasks/{id:guid}/result", async (Guid id, SubmitTaskResultRequest request, AgentHubDbContext db) =>
+app.MapPost("/api/tasks/{id:guid}/result", async (HttpContext http, Guid id, SubmitTaskResultRequest request, AgentHubDbContext db) =>
 {
     var task = await db.Tasks.FirstOrDefaultAsync(t => t.Id == id);
     if (task is null)
         return Results.NotFound(new { error = "task not found" });
+
+    var authResult = await RequireAgentAuth(http, db, task.TargetAgentId);
+    if (authResult is not null)
+        return authResult;
 
     task.Status = request.Success ? TaskStatus.Completed : TaskStatus.Failed;
     task.Result = request.Result?.Trim();
@@ -332,8 +353,12 @@ app.MapGet("/api/conversations/{id:guid}", async (Guid id, AgentHubDbContext db)
     return Results.Ok(ToConversationRecord(conversation, messages));
 }).WithOpenApi();
 
-app.MapPost("/api/conversations/{id:guid}/messages", async (Guid id, CreateMessageRequest request, AgentHubDbContext db) =>
+app.MapPost("/api/conversations/{id:guid}/messages", async (HttpContext http, Guid id, CreateMessageRequest request, AgentHubDbContext db) =>
 {
+    var authResult = await RequireAgentAuth(http, db, request.FromAgentId);
+    if (authResult is not null)
+        return authResult;
+
     var conversation = await db.Conversations.FirstOrDefaultAsync(c => c.Id == id);
     if (conversation is null)
         return Results.NotFound(new { error = "conversation not found" });
@@ -360,8 +385,12 @@ app.MapPost("/api/conversations/{id:guid}/messages", async (Guid id, CreateMessa
     return Results.Ok(ToMessageRecord(message));
 }).WithOpenApi();
 
-app.MapGet("/api/agents/{id:guid}/inbox", async (Guid id, AgentHubDbContext db) =>
+app.MapGet("/api/agents/{id:guid}/inbox", async (HttpContext http, Guid id, AgentHubDbContext db) =>
 {
+    var authResult = await RequireAgentAuth(http, db, id);
+    if (authResult is not null)
+        return authResult;
+
     var agentExists = await db.Agents.AsNoTracking().AnyAsync(a => a.Id == id);
     if (!agentExists)
         return Results.NotFound(new { error = "agent not found" });
@@ -387,6 +416,28 @@ static string[] NormalizeStrings(IEnumerable<string>? values) =>
         .Where(v => !string.IsNullOrWhiteSpace(v))
         .Distinct(StringComparer.OrdinalIgnoreCase)
         .ToArray() ?? [];
+
+static string GenerateApiKey() => Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
+
+static async Task<IResult?> RequireAgentAuth(HttpContext http, AgentHubDbContext db, Guid agentId)
+{
+    if (!http.Request.Headers.TryGetValue("Authorization", out var authHeader))
+        return Results.Unauthorized();
+
+    var header = authHeader.ToString();
+    if (!header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        return Results.Unauthorized();
+
+    var token = header[7..].Trim();
+    if (string.IsNullOrWhiteSpace(token))
+        return Results.Unauthorized();
+
+    var agent = await db.Agents.AsNoTracking().FirstOrDefaultAsync(a => a.Id == agentId);
+    if (agent is null)
+        return Results.NotFound(new { error = "agent not found" });
+
+    return agent.ApiKey == token ? null : Results.Unauthorized();
+}
 
 static string JoinList(IEnumerable<string>? values) => string.Join('|', NormalizeStrings(values));
 static string[] SplitList(string? value) => string.IsNullOrWhiteSpace(value) ? [] : value.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
@@ -539,6 +590,7 @@ public record MessageRecord(
 public class AgentEntity
 {
     public Guid Id { get; set; }
+    public string ApiKey { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
     public string Roles { get; set; } = string.Empty;
@@ -601,6 +653,8 @@ public class AgentHubDbContext(DbContextOptions<AgentHubDbContext> options) : Db
         modelBuilder.Entity<AgentEntity>(entity =>
         {
             entity.HasKey(x => x.Id);
+            entity.Property(x => x.ApiKey).IsRequired();
+            entity.HasIndex(x => x.ApiKey).IsUnique();
             entity.Property(x => x.Name).IsRequired();
             entity.Property(x => x.Roles).IsRequired();
             entity.Property(x => x.Skills).IsRequired();

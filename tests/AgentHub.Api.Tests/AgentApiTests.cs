@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -44,6 +45,7 @@ public class AgentApiTests : IClassFixture<AgentHubApiFactory>
         Assert.NotNull(body);
         Assert.True(body!.IsSearchOnly);
         Assert.Contains("seeker", body.Roles);
+        Assert.False(string.IsNullOrWhiteSpace(body.ApiKey));
     }
 
     [Fact]
@@ -74,7 +76,8 @@ public class AgentApiTests : IClassFixture<AgentHubApiFactory>
         var register = await _client.PostAsJsonAsync("/api/agents/register", new
         {
             name = "Worker Bot",
-            roles = new[] { "provider" }
+            roles = new[] { "provider" },
+            acceptMode = "AutoAccept"
         });
 
         register.EnsureSuccessStatusCode();
@@ -90,7 +93,9 @@ public class AgentApiTests : IClassFixture<AgentHubApiFactory>
 
         taskCreate.EnsureSuccessStatusCode();
 
-        var nextTask = await _client.GetAsync($"/api/agents/{agent.Id}/tasks/next");
+        using var nextTaskRequest = new HttpRequestMessage(HttpMethod.Get, $"/api/agents/{agent.Id}/tasks/next");
+        nextTaskRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", agent.ApiKey);
+        var nextTask = await _client.SendAsync(nextTaskRequest);
         nextTask.EnsureSuccessStatusCode();
 
         var taskBody = await nextTask.Content.ReadFromJsonAsync<TaskResponse>();
@@ -105,7 +110,8 @@ public class AgentApiTests : IClassFixture<AgentHubApiFactory>
         var register = await _client.PostAsJsonAsync("/api/agents/register", new
         {
             name = "Result Bot",
-            roles = new[] { "provider" }
+            roles = new[] { "provider" },
+            acceptMode = "AutoAccept"
         });
 
         register.EnsureSuccessStatusCode();
@@ -122,12 +128,17 @@ public class AgentApiTests : IClassFixture<AgentHubApiFactory>
         var createdTask = await taskCreate.Content.ReadFromJsonAsync<CreateTaskResponse>();
         Assert.NotNull(createdTask);
 
-        var resultResponse = await _client.PostAsJsonAsync($"/api/tasks/{createdTask!.Id}/result", new
+        using var resultRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/tasks/{createdTask!.Id}/result")
         {
-            success = true,
-            result = "Available tomorrow at 14:00"
-        });
+            Content = JsonContent.Create(new
+            {
+                success = true,
+                result = "Available tomorrow at 14:00"
+            })
+        };
+        resultRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", agent.ApiKey);
 
+        var resultResponse = await _client.SendAsync(resultRequest);
         resultResponse.EnsureSuccessStatusCode();
 
         var updatedTask = await resultResponse.Content.ReadFromJsonAsync<TaskResponse>();
@@ -177,21 +188,33 @@ public class AgentApiTests : IClassFixture<AgentHubApiFactory>
         var conversation = await conversationResponse.Content.ReadFromJsonAsync<ConversationResponse>();
         Assert.NotNull(conversation);
 
-        var firstMessageResponse = await _client.PostAsJsonAsync($"/api/conversations/{conversation!.Id}/messages", new
+        using var firstMessageRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/conversations/{conversation!.Id}/messages")
         {
-            fromAgentId = seeker.Id,
-            body = "Need movers tomorrow morning in Miami. Are you available?"
-        });
+            Content = JsonContent.Create(new
+            {
+                fromAgentId = seeker.Id,
+                body = "Need movers tomorrow morning in Miami. Are you available?"
+            })
+        };
+        firstMessageRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", seeker.ApiKey);
+        var firstMessageResponse = await _client.SendAsync(firstMessageRequest);
         firstMessageResponse.EnsureSuccessStatusCode();
 
-        var secondMessageResponse = await _client.PostAsJsonAsync($"/api/conversations/{conversation.Id}/messages", new
+        using var secondMessageRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/conversations/{conversation.Id}/messages")
         {
-            fromAgentId = provider.Id,
-            body = "Yes, available after 10:00."
-        });
+            Content = JsonContent.Create(new
+            {
+                fromAgentId = provider.Id,
+                body = "Yes, available after 10:00."
+            })
+        };
+        secondMessageRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", provider.ApiKey);
+        var secondMessageResponse = await _client.SendAsync(secondMessageRequest);
         secondMessageResponse.EnsureSuccessStatusCode();
 
-        var inboxResponse = await _client.GetAsync($"/api/agents/{provider.Id}/inbox");
+        using var inboxRequest = new HttpRequestMessage(HttpMethod.Get, $"/api/agents/{provider.Id}/inbox");
+        inboxRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", provider.ApiKey);
+        var inboxResponse = await _client.SendAsync(inboxRequest);
         inboxResponse.EnsureSuccessStatusCode();
         var inbox = await inboxResponse.Content.ReadFromJsonAsync<List<ConversationResponse>>();
 
@@ -202,7 +225,45 @@ public class AgentApiTests : IClassFixture<AgentHubApiFactory>
         Assert.Equal("Yes, available after 10:00.", providerConversation.Messages[1].Body);
     }
 
-    public sealed record RegisterResponse(Guid Id, string Name, string[] Roles, bool IsSearchOnly);
+    [Fact]
+    public async Task AskOwnerFirstProvider_RejectsDirectTaskCreation()
+    {
+        var register = await _client.PostAsJsonAsync("/api/agents/register", new
+        {
+            name = "Careful Bot",
+            roles = new[] { "provider" },
+            acceptMode = "AskOwnerFirst"
+        });
+        register.EnsureSuccessStatusCode();
+        var agent = await register.Content.ReadFromJsonAsync<RegisterResponse>();
+        Assert.NotNull(agent);
+
+        var createTask = await _client.PostAsJsonAsync("/api/tasks", new
+        {
+            targetAgentId = agent!.Id,
+            title = "Urgent moving job"
+        });
+
+        Assert.Equal(HttpStatusCode.Conflict, createTask.StatusCode);
+    }
+
+    [Fact]
+    public async Task ProtectedAgentEndpoint_WithoutBearerToken_ReturnsUnauthorized()
+    {
+        var register = await _client.PostAsJsonAsync("/api/agents/register", new
+        {
+            name = "Secure Bot",
+            roles = new[] { "provider" }
+        });
+        register.EnsureSuccessStatusCode();
+        var agent = await register.Content.ReadFromJsonAsync<RegisterResponse>();
+        Assert.NotNull(agent);
+
+        var response = await _client.GetAsync($"/api/agents/{agent!.Id}/tasks/next");
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    public sealed record RegisterResponse(Guid Id, string Name, string[] Roles, bool IsSearchOnly, string ApiKey);
     public sealed record SearchResponse(Guid Id, string Name, string[] Roles, bool IsSearchOnly);
     public sealed record CreateTaskResponse(Guid Id, string Status, Guid TargetAgentId);
     public sealed record TaskResponse(Guid Id, Guid TargetAgentId, string Title, string Status, string? Result);
