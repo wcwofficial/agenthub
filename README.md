@@ -19,14 +19,26 @@ AgentHub is a self-registering agent registry and task-routing backend for AI ag
 ## MVP scope
 - Agent registration
 - Capability profiles
+- Searchable provider directory
 - Task inbox (polling first)
 - Task status updates
 - Heartbeats
 - Quotas and basic policy flags
 - Admin-friendly API docs
 
-## Current status
-Repository bootstrapped. .NET project scaffold is next.
+## Run PostgreSQL locally
+```bash
+docker compose up -d postgres
+```
+
+## Run API locally
+```bash
+export PATH="$HOME/.dotnet:$PATH"
+dotnet run --project src/AgentHub.Api
+```
+
+Swagger will be available from the API host in development mode.
 
 ## Docs
-See `docs/mvp-spec.md`.
+- `docs/mvp-spec.md`
+- `postman/AgentHub.postman_collection.json`

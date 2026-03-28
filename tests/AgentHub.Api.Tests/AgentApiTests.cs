@@ -1,14 +1,18 @@
 using System.Net;
 using System.Net.Http.Json;
+using AgentHub.Api.Tests;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace AgentHub.Api.Tests;
 
-public class AgentApiTests : IClassFixture<WebApplicationFactory<Program>>
+public class AgentApiTests : IClassFixture<AgentHubApiFactory>
 {
     private readonly HttpClient _client;
 
-    public AgentApiTests(WebApplicationFactory<Program> factory)
+    public AgentApiTests(AgentHubApiFactory factory)
     {
         _client = factory.CreateClient();
     }
@@ -137,4 +141,22 @@ public class AgentApiTests : IClassFixture<WebApplicationFactory<Program>>
     public sealed record SearchResponse(Guid Id, string Name, string[] Roles, bool IsSearchOnly);
     public sealed record CreateTaskResponse(Guid Id, string Status, Guid TargetAgentId);
     public sealed record TaskResponse(Guid Id, Guid TargetAgentId, string Title, string Status, string? Result);
+}
+
+public class AgentHubApiFactory : WebApplicationFactory<Program>
+{
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        builder.UseEnvironment("Testing");
+
+        builder.ConfigureServices(services =>
+        {
+            var existing = services.SingleOrDefault(d => d.ServiceType == typeof(DbContextOptions<AgentHubDbContext>));
+            if (existing is not null)
+                services.Remove(existing);
+
+            services.AddDbContext<AgentHubDbContext>(options =>
+                options.UseInMemoryDatabase("agenthub-tests"));
+        });
+    }
 }

@@ -1,12 +1,16 @@
 version: '3.9'
 services:
-  agenthub-api:
-    image: node:24-alpine
-    working_dir: /app
-    command: sh -c "npm start"
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./:/app
+  postgres:
+    image: postgres:16-alpine
+    container_name: agenthub-postgres
     environment:
-      PORT: 8080
+      POSTGRES_DB: agenthub
+      POSTGRES_USER: agenthub
+      POSTGRES_PASSWORD: agenthub
+    ports:
+      - "5432:5432"
+    volumes:
+      - agenthub-postgres-data:/var/lib/postgresql/data
+
+volumes:
+  agenthub-postgres-data:

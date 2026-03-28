@@ -1,5 +1,5 @@
-using System.Collections.Concurrent;
 using System.Text.Json.Serialization;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -8,10 +8,30 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
 });
 
+var connectionString = builder.Configuration.GetConnectionString("AgentHub");
+
+builder.Services.AddDbContext<AgentHubDbContext>(options =>
+{
+    if (!string.IsNullOrWhiteSpace(connectionString))
+    {
+        options.UseNpgsql(connectionString);
+    }
+    else
+    {
+        options.UseInMemoryDatabase("agenthub-dev");
+    }
+});
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
+
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AgentHubDbContext>();
+    db.Database.EnsureCreated();
+}
 
 if (app.Environment.IsDevelopment())
 {
@@ -21,13 +41,11 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-var agents = new ConcurrentDictionary<Guid, AgentRecord>();
-var tasks = new ConcurrentDictionary<Guid, TaskRecord>();
-
 app.MapGet("/", () => Results.Ok(new
 {
     name = "AgentHub API",
-    version = "0.1.0",
+    version = "0.2.0",
+    persistence = string.IsNullOrWhiteSpace(connectionString) ? "InMemory" : "PostgreSQL",
     docs = "/swagger",
     features = new[]
     {
@@ -41,7 +59,7 @@ app.MapGet("/", () => Results.Ok(new
 
 app.MapGet("/health", () => Results.Ok(new { ok = true })).WithOpenApi();
 
-app.MapPost("/api/agents/register", (RegisterAgentRequest request) =>
+app.MapPost("/api/agents/register", async (RegisterAgentRequest request, AgentHubDbContext db) =>
 {
     if (string.IsNullOrWhiteSpace(request.Name))
         return Results.BadRequest(new { error = "name is required" });
@@ -50,60 +68,57 @@ app.MapPost("/api/agents/register", (RegisterAgentRequest request) =>
         return Results.BadRequest(new { error = "at least one role is required" });
 
     var now = DateTimeOffset.UtcNow;
-    var agent = new AgentRecord(
-        Id: Guid.NewGuid(),
-        Name: request.Name.Trim(),
-        Description: request.Description?.Trim(),
-        Roles: request.Roles.Select(r => r.Trim().ToLowerInvariant()).Distinct().ToArray(),
-        ServiceCategory: request.ServiceCategory?.Trim(),
-        Location: request.Location?.Trim(),
-        Skills: request.Skills?.Select(s => s.Trim()).Where(s => s.Length > 0).Distinct().ToArray() ?? [],
-        Languages: request.Languages?.Select(s => s.Trim()).Where(s => s.Length > 0).Distinct().ToArray() ?? [],
-        Availability: request.Availability?.Trim(),
-        Pricing: request.Pricing,
-        AcceptMode: request.AcceptMode ?? AcceptMode.AskOwnerFirst,
-        IsSearchOnly: request.IsSearchOnly,
-        ContactMode: request.ContactMode ?? ContactMode.Poll,
-        CreatedAtUtc: now,
-        LastHeartbeatAtUtc: null
-    );
+    var agent = new AgentEntity
+    {
+        Id = Guid.NewGuid(),
+        Name = request.Name.Trim(),
+        Description = request.Description?.Trim(),
+        Roles = JoinList(request.Roles),
+        ServiceCategory = request.ServiceCategory?.Trim(),
+        Location = request.Location?.Trim(),
+        Skills = JoinList(request.Skills),
+        Languages = JoinList(request.Languages),
+        Availability = request.Availability?.Trim(),
+        PricingCurrency = request.Pricing?.Currency,
+        PricingAmount = request.Pricing?.Amount,
+        PricingNotes = request.Pricing?.Notes,
+        AcceptMode = request.AcceptMode ?? AcceptMode.AskOwnerFirst,
+        IsSearchOnly = request.IsSearchOnly,
+        ContactMode = request.ContactMode ?? ContactMode.Poll,
+        CreatedAtUtc = now,
+        LastHeartbeatAtUtc = null
+    };
 
-    agents[agent.Id] = agent;
+    db.Agents.Add(agent);
+    await db.SaveChangesAsync();
 
     return Results.Ok(new
     {
         agent.Id,
         agent.Name,
-        agent.Roles,
+        Roles = SplitList(agent.Roles),
         agent.IsSearchOnly,
         message = "Agent registered successfully"
     });
 }).WithOpenApi();
 
-app.MapGet("/api/agents/{id:guid}", (Guid id) =>
+app.MapGet("/api/agents/{id:guid}", async (Guid id, AgentHubDbContext db) =>
 {
-    return agents.TryGetValue(id, out var agent)
-        ? Results.Ok(agent)
-        : Results.NotFound(new { error = "agent not found" });
+    var agent = await db.Agents.AsNoTracking().FirstOrDefaultAsync(a => a.Id == id);
+    return agent is null
+        ? Results.NotFound(new { error = "agent not found" })
+        : Results.Ok(ToAgentRecord(agent));
 }).WithOpenApi();
 
-app.MapGet("/api/agents/search", (
+app.MapGet("/api/agents/search", async (
     string? q,
     string? role,
     string? skill,
     string? location,
-    bool? searchOnly) =>
+    bool? searchOnly,
+    AgentHubDbContext db) =>
 {
-    IEnumerable<AgentRecord> query = agents.Values;
-
-    if (!string.IsNullOrWhiteSpace(q))
-    {
-        var needle = q.Trim();
-        query = query.Where(a =>
-            a.Name.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
-            (a.Description?.Contains(needle, StringComparison.OrdinalIgnoreCase) ?? false) ||
-            a.Skills.Any(s => s.Contains(needle, StringComparison.OrdinalIgnoreCase)));
-    }
+    var query = db.Agents.AsNoTracking().AsQueryable();
 
     if (!string.IsNullOrWhiteSpace(role))
     {
@@ -111,108 +126,117 @@ app.MapGet("/api/agents/search", (
         query = query.Where(a => a.Roles.Contains(roleNeedle));
     }
 
+    if (searchOnly.HasValue)
+        query = query.Where(a => a.IsSearchOnly == searchOnly.Value);
+
+    var agents = await query.OrderBy(a => a.Name).ToListAsync();
+
+    if (!string.IsNullOrWhiteSpace(q))
+    {
+        var needle = q.Trim();
+        agents = agents.Where(a =>
+            a.Name.Contains(needle, StringComparison.OrdinalIgnoreCase) ||
+            (a.Description?.Contains(needle, StringComparison.OrdinalIgnoreCase) ?? false) ||
+            SplitList(a.Skills).Any(s => s.Contains(needle, StringComparison.OrdinalIgnoreCase))).ToList();
+    }
+
     if (!string.IsNullOrWhiteSpace(skill))
     {
         var skillNeedle = skill.Trim();
-        query = query.Where(a => a.Skills.Any(s => s.Contains(skillNeedle, StringComparison.OrdinalIgnoreCase)));
+        agents = agents.Where(a => SplitList(a.Skills).Any(s => s.Contains(skillNeedle, StringComparison.OrdinalIgnoreCase))).ToList();
     }
 
     if (!string.IsNullOrWhiteSpace(location))
     {
         var locationNeedle = location.Trim();
-        query = query.Where(a => (a.Location?.Contains(locationNeedle, StringComparison.OrdinalIgnoreCase) ?? false));
+        agents = agents.Where(a => a.Location?.Contains(locationNeedle, StringComparison.OrdinalIgnoreCase) ?? false).ToList();
     }
 
-    if (searchOnly.HasValue)
-        query = query.Where(a => a.IsSearchOnly == searchOnly.Value);
-
-    var results = query
-        .OrderBy(a => a.Name)
-        .Select(a => new AgentSearchResult(
-            a.Id,
-            a.Name,
-            a.Description,
-            a.Roles,
-            a.ServiceCategory,
-            a.Location,
-            a.Skills,
-            a.Availability,
-            a.Pricing,
-            a.AcceptMode,
-            a.IsSearchOnly,
-            a.LastHeartbeatAtUtc))
-        .ToArray();
+    var results = agents.Select(a => new AgentSearchResult(
+        a.Id,
+        a.Name,
+        a.Description,
+        SplitList(a.Roles),
+        a.ServiceCategory,
+        a.Location,
+        SplitList(a.Skills),
+        a.Availability,
+        ToPricingInfo(a),
+        a.AcceptMode,
+        a.IsSearchOnly,
+        a.LastHeartbeatAtUtc)).ToArray();
 
     return Results.Ok(results);
 }).WithOpenApi();
 
-app.MapPatch("/api/agents/{id:guid}/profile", (Guid id, UpdateAgentProfileRequest request) =>
+app.MapPatch("/api/agents/{id:guid}/profile", async (Guid id, UpdateAgentProfileRequest request, AgentHubDbContext db) =>
 {
-    if (!agents.TryGetValue(id, out var current))
+    var agent = await db.Agents.FirstOrDefaultAsync(a => a.Id == id);
+    if (agent is null)
         return Results.NotFound(new { error = "agent not found" });
 
-    var updated = current with
-    {
-        Description = request.Description ?? current.Description,
-        ServiceCategory = request.ServiceCategory ?? current.ServiceCategory,
-        Location = request.Location ?? current.Location,
-        Skills = request.Skills?.Select(s => s.Trim()).Where(s => s.Length > 0).Distinct().ToArray() ?? current.Skills,
-        Languages = request.Languages?.Select(s => s.Trim()).Where(s => s.Length > 0).Distinct().ToArray() ?? current.Languages,
-        Availability = request.Availability ?? current.Availability,
-        Pricing = request.Pricing ?? current.Pricing,
-        IsSearchOnly = request.IsSearchOnly ?? current.IsSearchOnly
-    };
+    agent.Description = request.Description ?? agent.Description;
+    agent.ServiceCategory = request.ServiceCategory ?? agent.ServiceCategory;
+    agent.Location = request.Location ?? agent.Location;
+    agent.Skills = request.Skills is null ? agent.Skills : JoinList(request.Skills);
+    agent.Languages = request.Languages is null ? agent.Languages : JoinList(request.Languages);
+    agent.Availability = request.Availability ?? agent.Availability;
+    agent.PricingCurrency = request.Pricing?.Currency ?? agent.PricingCurrency;
+    agent.PricingAmount = request.Pricing?.Amount ?? agent.PricingAmount;
+    agent.PricingNotes = request.Pricing?.Notes ?? agent.PricingNotes;
+    agent.IsSearchOnly = request.IsSearchOnly ?? agent.IsSearchOnly;
 
-    agents[id] = updated;
-    return Results.Ok(updated);
+    await db.SaveChangesAsync();
+    return Results.Ok(ToAgentRecord(agent));
 }).WithOpenApi();
 
-app.MapPost("/api/agents/{id:guid}/heartbeat", (Guid id) =>
+app.MapPost("/api/agents/{id:guid}/heartbeat", async (Guid id, AgentHubDbContext db) =>
 {
-    if (!agents.TryGetValue(id, out var current))
+    var agent = await db.Agents.FirstOrDefaultAsync(a => a.Id == id);
+    if (agent is null)
         return Results.NotFound(new { error = "agent not found" });
 
-    var updated = current with { LastHeartbeatAtUtc = DateTimeOffset.UtcNow };
-    agents[id] = updated;
+    agent.LastHeartbeatAtUtc = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync();
 
-    var pendingCount = tasks.Values.Count(t => t.TargetAgentId == id && t.Status is TaskStatus.Pending or TaskStatus.Claimed);
+    var pendingCount = await db.Tasks.CountAsync(t => t.TargetAgentId == id && (t.Status == TaskStatus.Pending || t.Status == TaskStatus.Claimed));
 
     return Results.Ok(new
     {
         ok = true,
         agentId = id,
         pendingTasks = pendingCount,
-        lastHeartbeatAtUtc = updated.LastHeartbeatAtUtc
+        lastHeartbeatAtUtc = agent.LastHeartbeatAtUtc
     });
 }).WithOpenApi();
 
-app.MapPost("/api/tasks", (CreateTaskRequest request) =>
+app.MapPost("/api/tasks", async (CreateTaskRequest request, AgentHubDbContext db) =>
 {
     if (request.TargetAgentId is null)
         return Results.BadRequest(new { error = "targetAgentId is required" });
 
-    if (!agents.TryGetValue(request.TargetAgentId.Value, out var targetAgent))
+    var targetAgent = await db.Agents.AsNoTracking().FirstOrDefaultAsync(a => a.Id == request.TargetAgentId.Value);
+    if (targetAgent is null)
         return Results.NotFound(new { error = "target agent not found" });
 
     if (string.IsNullOrWhiteSpace(request.Title))
         return Results.BadRequest(new { error = "title is required" });
 
-    var now = DateTimeOffset.UtcNow;
-    var task = new TaskRecord(
-        Id: Guid.NewGuid(),
-        FromAgentId: request.FromAgentId,
-        TargetAgentId: request.TargetAgentId.Value,
-        Title: request.Title.Trim(),
-        Message: request.Message?.Trim(),
-        Budget: request.Budget,
-        Status: TaskStatus.Pending,
-        Result: null,
-        CreatedAtUtc: now,
-        ClaimedAtUtc: null,
-        CompletedAtUtc: null
-    );
+    var task = new TaskEntity
+    {
+        Id = Guid.NewGuid(),
+        FromAgentId = request.FromAgentId,
+        TargetAgentId = request.TargetAgentId.Value,
+        Title = request.Title.Trim(),
+        Message = request.Message?.Trim(),
+        Budget = request.Budget,
+        Status = TaskStatus.Pending,
+        Result = null,
+        CreatedAtUtc = DateTimeOffset.UtcNow
+    };
 
-    tasks[task.Id] = task;
+    db.Tasks.Add(task);
+    await db.SaveChangesAsync();
 
     return Results.Ok(new
     {
@@ -223,56 +247,97 @@ app.MapPost("/api/tasks", (CreateTaskRequest request) =>
     });
 }).WithOpenApi();
 
-app.MapGet("/api/agents/{id:guid}/tasks/next", (Guid id) =>
+app.MapGet("/api/agents/{id:guid}/tasks/next", async (Guid id, AgentHubDbContext db) =>
 {
-    if (!agents.ContainsKey(id))
+    var agentExists = await db.Agents.AsNoTracking().AnyAsync(a => a.Id == id);
+    if (!agentExists)
         return Results.NotFound(new { error = "agent not found" });
 
-    var nextTask = tasks.Values
+    var nextTask = await db.Tasks.AsNoTracking()
         .Where(t => t.TargetAgentId == id && t.Status == TaskStatus.Pending)
         .OrderBy(t => t.CreatedAtUtc)
-        .FirstOrDefault();
+        .FirstOrDefaultAsync();
 
     return nextTask is null
         ? Results.NoContent()
-        : Results.Ok(nextTask);
+        : Results.Ok(ToTaskRecord(nextTask));
 }).WithOpenApi();
 
-app.MapPost("/api/tasks/{id:guid}/claim", (Guid id) =>
+app.MapPost("/api/tasks/{id:guid}/claim", async (Guid id, AgentHubDbContext db) =>
 {
-    if (!tasks.TryGetValue(id, out var current))
+    var task = await db.Tasks.FirstOrDefaultAsync(t => t.Id == id);
+    if (task is null)
         return Results.NotFound(new { error = "task not found" });
 
-    if (current.Status != TaskStatus.Pending)
+    if (task.Status != TaskStatus.Pending)
         return Results.BadRequest(new { error = "task is not pending" });
 
-    var updated = current with
-    {
-        Status = TaskStatus.Claimed,
-        ClaimedAtUtc = DateTimeOffset.UtcNow
-    };
+    task.Status = TaskStatus.Claimed;
+    task.ClaimedAtUtc = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync();
 
-    tasks[id] = updated;
-    return Results.Ok(updated);
+    return Results.Ok(ToTaskRecord(task));
 }).WithOpenApi();
 
-app.MapPost("/api/tasks/{id:guid}/result", (Guid id, SubmitTaskResultRequest request) =>
+app.MapPost("/api/tasks/{id:guid}/result", async (Guid id, SubmitTaskResultRequest request, AgentHubDbContext db) =>
 {
-    if (!tasks.TryGetValue(id, out var current))
+    var task = await db.Tasks.FirstOrDefaultAsync(t => t.Id == id);
+    if (task is null)
         return Results.NotFound(new { error = "task not found" });
 
-    var updated = current with
-    {
-        Status = request.Success ? TaskStatus.Completed : TaskStatus.Failed,
-        Result = request.Result?.Trim(),
-        CompletedAtUtc = DateTimeOffset.UtcNow
-    };
+    task.Status = request.Success ? TaskStatus.Completed : TaskStatus.Failed;
+    task.Result = request.Result?.Trim();
+    task.CompletedAtUtc = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync();
 
-    tasks[id] = updated;
-    return Results.Ok(updated);
+    return Results.Ok(ToTaskRecord(task));
 }).WithOpenApi();
 
 app.Run();
+
+static string[] NormalizeStrings(IEnumerable<string>? values) =>
+    values?.Select(v => v.Trim())
+        .Where(v => !string.IsNullOrWhiteSpace(v))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToArray() ?? [];
+
+static string JoinList(IEnumerable<string>? values) => string.Join('|', NormalizeStrings(values));
+static string[] SplitList(string? value) => string.IsNullOrWhiteSpace(value) ? [] : value.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+static PricingInfo? ToPricingInfo(AgentEntity agent) =>
+    agent.PricingCurrency is null && agent.PricingAmount is null && agent.PricingNotes is null
+        ? null
+        : new PricingInfo(agent.PricingCurrency, agent.PricingAmount, agent.PricingNotes);
+
+static AgentRecord ToAgentRecord(AgentEntity agent) => new(
+    agent.Id,
+    agent.Name,
+    agent.Description,
+    SplitList(agent.Roles),
+    agent.ServiceCategory,
+    agent.Location,
+    SplitList(agent.Skills),
+    SplitList(agent.Languages),
+    agent.Availability,
+    ToPricingInfo(agent),
+    agent.AcceptMode,
+    agent.IsSearchOnly,
+    agent.ContactMode,
+    agent.CreatedAtUtc,
+    agent.LastHeartbeatAtUtc);
+
+static TaskRecord ToTaskRecord(TaskEntity task) => new(
+    task.Id,
+    task.FromAgentId,
+    task.TargetAgentId,
+    task.Title,
+    task.Message,
+    task.Budget,
+    task.Status,
+    task.Result,
+    task.CreatedAtUtc,
+    task.ClaimedAtUtc,
+    task.CompletedAtUtc);
 
 public record RegisterAgentRequest(
     string Name,
@@ -306,7 +371,6 @@ public record CreateTaskRequest(
     decimal? Budget);
 
 public record SubmitTaskResultRequest(bool Success, string? Result);
-
 public record PricingInfo(string? Currency, decimal? Amount, string? Notes);
 
 public record AgentRecord(
@@ -352,6 +416,66 @@ public record TaskRecord(
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset? ClaimedAtUtc,
     DateTimeOffset? CompletedAtUtc);
+
+public class AgentEntity
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string Roles { get; set; } = string.Empty;
+    public string? ServiceCategory { get; set; }
+    public string? Location { get; set; }
+    public string Skills { get; set; } = string.Empty;
+    public string Languages { get; set; } = string.Empty;
+    public string? Availability { get; set; }
+    public string? PricingCurrency { get; set; }
+    public decimal? PricingAmount { get; set; }
+    public string? PricingNotes { get; set; }
+    public AcceptMode AcceptMode { get; set; }
+    public bool IsSearchOnly { get; set; }
+    public ContactMode ContactMode { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset? LastHeartbeatAtUtc { get; set; }
+}
+
+public class TaskEntity
+{
+    public Guid Id { get; set; }
+    public Guid? FromAgentId { get; set; }
+    public Guid TargetAgentId { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public string? Message { get; set; }
+    public decimal? Budget { get; set; }
+    public TaskStatus Status { get; set; }
+    public string? Result { get; set; }
+    public DateTimeOffset CreatedAtUtc { get; set; }
+    public DateTimeOffset? ClaimedAtUtc { get; set; }
+    public DateTimeOffset? CompletedAtUtc { get; set; }
+}
+
+public class AgentHubDbContext(DbContextOptions<AgentHubDbContext> options) : DbContext(options)
+{
+    public DbSet<AgentEntity> Agents => Set<AgentEntity>();
+    public DbSet<TaskEntity> Tasks => Set<TaskEntity>();
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        modelBuilder.Entity<AgentEntity>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Name).IsRequired();
+            entity.Property(x => x.Roles).IsRequired();
+            entity.Property(x => x.Skills).IsRequired();
+            entity.Property(x => x.Languages).IsRequired();
+        });
+
+        modelBuilder.Entity<TaskEntity>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Title).IsRequired();
+        });
+    }
+}
 
 public enum AcceptMode
 {
