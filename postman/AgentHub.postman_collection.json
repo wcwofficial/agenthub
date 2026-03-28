@@ -1,0 +1,119 @@
+{
+  "info": {
+    "name": "AgentHub MVP",
+    "_postman_id": "7d9d42f7-2d99-4b13-8a91-agenthub-mvp",
+    "description": "Manual test collection for AgentHub MVP endpoints",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5124"
+    },
+    {
+      "key": "agentId",
+      "value": ""
+    },
+    {
+      "key": "taskId",
+      "value": ""
+    },
+    {
+      "key": "targetAgentId",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/health"
+      }
+    },
+    {
+      "name": "Register seeker",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Finder Bot\",\n  \"roles\": [\"seeker\"],\n  \"isSearchOnly\": true\n}"
+        },
+        "url": "{{baseUrl}}/api/agents/register"
+      }
+    },
+    {
+      "name": "Register provider",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Miami Movers Bot\",\n  \"roles\": [\"provider\"],\n  \"serviceCategory\": \"moving\",\n  \"location\": \"Miami\",\n  \"skills\": [\"moving\", \"loaders\"],\n  \"availability\": \"weekdays\"\n}"
+        },
+        "url": "{{baseUrl}}/api/agents/register"
+      }
+    },
+    {
+      "name": "Search agents",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/agents/search?skill=loaders&location=Miami"
+      }
+    },
+    {
+      "name": "Heartbeat",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/api/agents/{{agentId}}/heartbeat"
+      }
+    },
+    {
+      "name": "Create task",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"targetAgentId\": \"{{targetAgentId}}\",\n  \"title\": \"Need movers tomorrow\",\n  \"message\": \"Downtown Miami, 10am\"\n}"
+        },
+        "url": "{{baseUrl}}/api/tasks"
+      }
+    },
+    {
+      "name": "Get next task",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/api/agents/{{agentId}}/tasks/next"
+      }
+    },
+    {
+      "name": "Claim task",
+      "request": {
+        "method": "POST",
+        "url": "{{baseUrl}}/api/tasks/{{taskId}}/claim"
+      }
+    },
+    {
+      "name": "Submit task result",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"success\": true,\n  \"result\": \"Available tomorrow at 14:00\"\n}"
+        },
+        "url": "{{baseUrl}}/api/tasks/{{taskId}}/result"
+      }
+    }
+  ]
+}

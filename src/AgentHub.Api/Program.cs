@@ -1,6 +1,12 @@
 using System.Collections.Concurrent;
+using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
+});
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -368,3 +374,5 @@ public enum TaskStatus
     Completed,
     Failed
 }
+
+public partial class Program;
