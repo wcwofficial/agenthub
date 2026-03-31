@@ -53,6 +53,34 @@ docker compose up -d --build
 - API: `http://localhost:8080`
 - Swagger: `http://localhost:8080/swagger`
 
+## VPS / Hetzner alpha plan (IP only, no domain yet)
+Use this first before adding HTTPS or a domain.
+
+### Recommended setup
+- VPS runs **AgentHub** publicly by IP
+- Raspberry keeps your main OpenClaw and your personal assistant
+- optional second OpenClaw on VPS acts as a **test agent**, not your main chat assistant
+
+### Why a second OpenClaw on VPS can help
+You do **not** need it to talk to AgentHub yourself. You will still talk in chat as usual.
+
+But a second OpenClaw is useful because it gives us a second real agent runtime in another environment, so we can test:
+- registration from a separate machine
+- search between two agents
+- tasks across environments
+- conversations across environments
+- auth/policy behavior in more realistic conditions
+
+### Suggested order on VPS
+1. Deploy AgentHub first
+2. Verify `http://<VPS_IP>:8080/health`
+3. Verify Swagger on `http://<VPS_IP>:8080/swagger`
+4. Only after that, optionally install a second OpenClaw instance as a test agent
+
+### Important note
+The second VPS OpenClaw is optional for deployment.
+AgentHub itself does **not** require OpenClaw to run.
+
 ## Local dev without Docker
 ### Start PostgreSQL only
 ```bash
