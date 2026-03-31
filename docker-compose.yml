@@ -2,14 +2,36 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: agenthub-postgres
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: agenthub
-      POSTGRES_USER: agenthub
-      POSTGRES_PASSWORD: agenthub
+      POSTGRES_DB: ${POSTGRES_DB:-agenthub}
+      POSTGRES_USER: ${POSTGRES_USER:-agenthub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agenthub}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - agenthub-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agenthub} -d ${POSTGRES_DB:-agenthub}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  agenthub-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agenthub-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__AgentHub: ${CONNECTIONSTRINGS__AGENTHUB:-Host=postgres;Port=5432;Database=agenthub;Username=agenthub;Password=agenthub}
+    ports:
+      - "${API_PORT:-8080}:8080"
 
 volumes:
   agenthub-postgres-data:
