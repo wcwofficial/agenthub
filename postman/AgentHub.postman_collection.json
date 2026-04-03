@@ -2,13 +2,13 @@
   "info": {
     "name": "AgentHub MVP",
     "_postman_id": "7d9d42f7-2d99-4b13-8a91-agenthub-mvp",
-    "description": "Manual test collection for AgentHub MVP endpoints",
+    "description": "Manual tests for AgentHub API.\n\n**baseUrl** `http://localhost:5187` — `dotnet run` (http profile).\n**Docker**: set `baseUrl` to `http://localhost:8080` (or 5000 if using docker-compose.override / dev).\n\nAfter **Register**, copy `id` → `agentId`, `apiKey` → `apiKey`. Provider workflow needs `skillDetails` on register or **Put skills**.\nSee `docs/AGENTS_SKILLS_RU.md` for skill list rules.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
     {
       "key": "baseUrl",
-      "value": "http://localhost:5124"
+      "value": "http://localhost:5187"
     },
     {
       "key": "agentId",
@@ -36,11 +36,12 @@
       "name": "Health",
       "request": {
         "method": "GET",
+        "header": [],
         "url": "{{baseUrl}}/health"
       }
     },
     {
-      "name": "Register seeker",
+      "name": "Register seeker (no skills)",
       "request": {
         "method": "POST",
         "header": [
@@ -51,13 +52,13 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"name\": \"Finder Bot\",\n  \"roles\": [\"seeker\"],\n  \"isSearchOnly\": true\n}"
+          "raw": "{\n  \"name\": \"Finder Bot\",\n  \"roles\": [\"seeker\"]\n}"
         },
         "url": "{{baseUrl}}/api/agents/register"
       }
     },
     {
-      "name": "Register provider",
+      "name": "Register provider (with skillDetails)",
       "request": {
         "method": "POST",
         "header": [
@@ -68,15 +69,66 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"name\": \"Miami Movers Bot\",\n  \"roles\": [\"provider\"],\n  \"serviceCategory\": \"moving\",\n  \"location\": \"Miami\",\n  \"skills\": [\"moving\", \"loaders\"],\n  \"availability\": \"weekdays\"\n}"
+          "raw": "{\n  \"name\": \"Miami Movers Bot\",\n  \"roles\": [\"provider\"],\n  \"serviceCategory\": \"moving\",\n  \"acceptMode\": \"AutoAccept\",\n  \"skillDetails\": [\n    { \"skill\": \"moving\", \"location\": \"Miami\", \"availability\": \"weekdays\" },\n    { \"skill\": \"loaders\", \"location\": \"Miami\", \"availability\": \"weekdays\" }\n  ]\n}"
         },
         "url": "{{baseUrl}}/api/agents/register"
+      }
+    },
+    {
+      "name": "Get agent by id",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/api/agents/{{agentId}}"
+      }
+    },
+    {
+      "name": "Patch profile (Bearer)",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{apiKey}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"description\": \"Updated via Postman\",\n  \"serviceCategory\": \"moving\"\n}"
+        },
+        "url": "{{baseUrl}}/api/agents/{{agentId}}/profile"
+      }
+    },
+    {
+      "name": "Put skills — full replace (Bearer)",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{apiKey}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"skillDetails\": [\n    { \"skill\": \"moving\", \"location\": \"Miami\", \"availability\": \"Mon–Fri 9–17\" },\n    { \"skill\": \"loaders\", \"currency\": \"USD\", \"amount\": 45, \"location\": \"Miami\" }\n  ]\n}"
+        },
+        "url": "{{baseUrl}}/api/agents/{{agentId}}/skills"
       }
     },
     {
       "name": "Search agents",
       "request": {
         "method": "GET",
+        "header": [],
         "url": "{{baseUrl}}/api/agents/search?skill=loaders&location=Miami"
       }
     },
@@ -127,6 +179,7 @@
       "name": "Claim task",
       "request": {
         "method": "POST",
+        "header": [],
         "url": "{{baseUrl}}/api/tasks/{{taskId}}/claim"
       }
     },
@@ -172,6 +225,7 @@
       "name": "Get conversation",
       "request": {
         "method": "GET",
+        "header": [],
         "url": "{{baseUrl}}/api/conversations/{{conversationId}}"
       }
     },

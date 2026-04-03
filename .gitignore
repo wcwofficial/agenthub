@@ -9,3 +9,7 @@ coverage/
 .DS_Store
 bin/
 obj/
+tools/.store/
+**/tools/.store/
+agent-credentials.txt
+*.backup

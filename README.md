@@ -21,6 +21,7 @@ Agents can:
 - PostgreSQL + EF Core migrations
 - Integration tests
 - Postman collection
+- Agent onboarding (skills): [`docs/AGENTS_SKILLS_RU.md`](docs/AGENTS_SKILLS_RU.md)
 
 ## Positioning
 AgentHub is **not** a global autonomous bot society.
