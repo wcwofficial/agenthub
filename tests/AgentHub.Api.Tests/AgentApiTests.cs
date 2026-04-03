@@ -174,10 +174,11 @@ public class AgentApiTests : IClassFixture<AgentHubApiFactory>
         var claimNoAuth = await _client.PostAsync($"/api/tasks/{created!.Id}/claim", null);
         Assert.Equal(HttpStatusCode.Unauthorized, claimNoAuth.StatusCode);
 
-        using var claimOk = new HttpRequestMessage(HttpMethod.Post, $"/api/tasks/{created.Id}/claim");
+        using var claimOk = new HttpRequestMessage(HttpMethod.Post, $"/api/tasks/{created!.Id}/claim");
         claimOk.Headers.Authorization = new AuthenticationHeaderValue("Bearer", worker.ApiKey);
         var claimRes = await _client.SendAsync(claimOk);
         claimRes.EnsureSuccessStatusCode();
+
         var task = await claimRes.Content.ReadFromJsonAsync<TaskResponse>();
         Assert.NotNull(task);
         Assert.Equal("Claimed", task!.Status);
@@ -241,7 +242,11 @@ public class AgentApiTests : IClassFixture<AgentHubApiFactory>
         var createdTask = await taskCreate.Content.ReadFromJsonAsync<CreateTaskResponse>();
         Assert.NotNull(createdTask);
 
-        using var resultRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/tasks/{createdTask!.Id}/result")
+        using var claimRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/tasks/{createdTask!.Id}/claim");
+        claimRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", agent.ApiKey);
+        (await _client.SendAsync(claimRequest)).EnsureSuccessStatusCode();
+
+        using var resultRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/tasks/{createdTask.Id}/result")
         {
             Content = JsonContent.Create(new
             {
@@ -340,25 +345,176 @@ public class AgentApiTests : IClassFixture<AgentHubApiFactory>
     }
 
     [Fact]
-    public async Task AskOwnerFirstProvider_RejectsDirectTaskCreation()
+    public async Task NeverAutoProvider_BlockTaskCreation_ReturnsConflict()
     {
-        var register = await _client.PostAsJsonAsync("/api/agents/register", new
+        var reg = await _client.PostAsJsonAsync("/api/agents/register", new
+        {
+            name = "Closed Bot",
+            roles = new[] { "provider" },
+            acceptMode = "NeverAuto"
+        });
+        reg.EnsureSuccessStatusCode();
+        var agent = await reg.Content.ReadFromJsonAsync<RegisterResponse>();
+
+        var createTask = await _client.PostAsJsonAsync("/api/tasks", new
+        {
+            targetAgentId = agent!.Id,
+            title = "Nope"
+        });
+        Assert.Equal(HttpStatusCode.Conflict, createTask.StatusCode);
+    }
+
+    [Fact]
+    public async Task AskOwnerFirst_CreatesAwaiting_ThenAcceptClaim_Completes()
+    {
+        var providerReg = await _client.PostAsJsonAsync("/api/agents/register", new
         {
             name = "Careful Bot",
             roles = new[] { "provider" },
             acceptMode = "AskOwnerFirst"
         });
-        register.EnsureSuccessStatusCode();
-        var agent = await register.Content.ReadFromJsonAsync<RegisterResponse>();
-        Assert.NotNull(agent);
+        providerReg.EnsureSuccessStatusCode();
+        var provider = await providerReg.Content.ReadFromJsonAsync<RegisterResponse>();
+        Assert.NotNull(provider);
+
+        var seekerReg = await _client.PostAsJsonAsync("/api/agents/register", new
+        {
+            name = "Seeker Bot",
+            roles = new[] { "seeker" }
+        });
+        seekerReg.EnsureSuccessStatusCode();
+        var seeker = await seekerReg.Content.ReadFromJsonAsync<RegisterResponse>();
+        Assert.NotNull(seeker);
 
         var createTask = await _client.PostAsJsonAsync("/api/tasks", new
         {
-            targetAgentId = agent!.Id,
+            fromAgentId = seeker!.Id,
+            targetAgentId = provider!.Id,
             title = "Urgent moving job"
         });
+        createTask.EnsureSuccessStatusCode();
+        var created = await createTask.Content.ReadFromJsonAsync<CreateTaskResponse>();
+        Assert.NotNull(created);
+        Assert.Equal("AwaitingTargetAcceptance", created!.Status);
 
-        Assert.Equal(HttpStatusCode.Conflict, createTask.StatusCode);
+        using var next1 = new HttpRequestMessage(HttpMethod.Get, $"/api/agents/{provider.Id}/tasks/next");
+        next1.Headers.Authorization = new AuthenticationHeaderValue("Bearer", provider.ApiKey);
+        var nextRes = await _client.SendAsync(next1);
+        nextRes.EnsureSuccessStatusCode();
+        var peek = await nextRes.Content.ReadFromJsonAsync<TaskResponse>();
+        Assert.NotNull(peek);
+        Assert.Equal("AwaitingTargetAcceptance", peek!.Status);
+
+        var claimTooEarly = await _client.PostAsync($"/api/tasks/{created.Id}/claim", null);
+        Assert.Equal(HttpStatusCode.Unauthorized, claimTooEarly.StatusCode);
+
+        using var claimBad = new HttpRequestMessage(HttpMethod.Post, $"/api/tasks/{created.Id}/claim");
+        claimBad.Headers.Authorization = new AuthenticationHeaderValue("Bearer", provider.ApiKey);
+        Assert.Equal(HttpStatusCode.BadRequest, (await _client.SendAsync(claimBad)).StatusCode);
+
+        using var acceptReq = new HttpRequestMessage(HttpMethod.Post, $"/api/tasks/{created.Id}/accept");
+        acceptReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", provider.ApiKey);
+        (await _client.SendAsync(acceptReq)).EnsureSuccessStatusCode();
+
+        using var claimOk = new HttpRequestMessage(HttpMethod.Post, $"/api/tasks/{created.Id}/claim");
+        claimOk.Headers.Authorization = new AuthenticationHeaderValue("Bearer", provider.ApiKey);
+        (await _client.SendAsync(claimOk)).EnsureSuccessStatusCode();
+    }
+
+    [Fact]
+    public async Task AskOwnerFirst_Decline_EndsInDeclined()
+    {
+        var providerReg = await _client.PostAsJsonAsync("/api/agents/register", new
+        {
+            name = "Decline Bot",
+            roles = new[] { "provider" },
+            acceptMode = "AskOwnerFirst"
+        });
+        providerReg.EnsureSuccessStatusCode();
+        var provider = await providerReg.Content.ReadFromJsonAsync<RegisterResponse>();
+
+        var createTask = await _client.PostAsJsonAsync("/api/tasks", new
+        {
+            targetAgentId = provider!.Id,
+            title = "No thanks"
+        });
+        createTask.EnsureSuccessStatusCode();
+        var created = await createTask.Content.ReadFromJsonAsync<CreateTaskResponse>();
+        Assert.NotNull(created);
+
+        using var declineReq = new HttpRequestMessage(HttpMethod.Post, $"/api/tasks/{created!.Id}/decline")
+        {
+            Content = JsonContent.Create(new { reason = "Busy" })
+        };
+        declineReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", provider.ApiKey);
+        var declineRes = await _client.SendAsync(declineReq);
+        declineRes.EnsureSuccessStatusCode();
+        var body = await declineRes.Content.ReadFromJsonAsync<TaskResponse>();
+        Assert.NotNull(body);
+        Assert.Equal("Declined", body!.Status);
+    }
+
+    [Fact]
+    public async Task Cancel_BySeeker_Works_WhenAwaiting()
+    {
+        var seekerReg = await _client.PostAsJsonAsync("/api/agents/register", new { name = "Cancel S", roles = new[] { "seeker" } });
+        seekerReg.EnsureSuccessStatusCode();
+        var seeker = await seekerReg.Content.ReadFromJsonAsync<RegisterResponse>();
+
+        var providerReg = await _client.PostAsJsonAsync("/api/agents/register", new
+        {
+            name = "Cancel P",
+            roles = new[] { "provider" },
+            acceptMode = "AskOwnerFirst"
+        });
+        providerReg.EnsureSuccessStatusCode();
+        var provider = await providerReg.Content.ReadFromJsonAsync<RegisterResponse>();
+
+        var createTask = await _client.PostAsJsonAsync("/api/tasks", new
+        {
+            fromAgentId = seeker!.Id,
+            targetAgentId = provider!.Id,
+            title = "Never mind"
+        });
+        createTask.EnsureSuccessStatusCode();
+        var created = await createTask.Content.ReadFromJsonAsync<CreateTaskResponse>();
+        Assert.NotNull(created);
+
+        using var cancelReq = new HttpRequestMessage(HttpMethod.Post, $"/api/tasks/{created!.Id}/cancel");
+        cancelReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", seeker.ApiKey);
+        var cancelRes = await _client.SendAsync(cancelReq);
+        cancelRes.EnsureSuccessStatusCode();
+        var t = await cancelRes.Content.ReadFromJsonAsync<TaskResponse>();
+        Assert.Equal("Cancelled", t!.Status);
+    }
+
+    [Fact]
+    public async Task SubmitTaskResult_WithoutClaim_ReturnsBadRequest()
+    {
+        var register = await _client.PostAsJsonAsync("/api/agents/register", new
+        {
+            name = "No Claim Bot",
+            roles = new[] { "provider" },
+            acceptMode = "AutoAccept"
+        });
+        register.EnsureSuccessStatusCode();
+        var agent = await register.Content.ReadFromJsonAsync<RegisterResponse>();
+
+        var taskCreate = await _client.PostAsJsonAsync("/api/tasks", new
+        {
+            targetAgentId = agent!.Id,
+            title = "Skip claim"
+        });
+        taskCreate.EnsureSuccessStatusCode();
+        var created = await taskCreate.Content.ReadFromJsonAsync<CreateTaskResponse>();
+
+        using var resultRequest = new HttpRequestMessage(HttpMethod.Post, $"/api/tasks/{created!.Id}/result")
+        {
+            Content = JsonContent.Create(new { success = true, result = "nope" })
+        };
+        resultRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", agent.ApiKey);
+        var resultResponse = await _client.SendAsync(resultRequest);
+        Assert.Equal(HttpStatusCode.BadRequest, resultResponse.StatusCode);
     }
 
     [Fact]

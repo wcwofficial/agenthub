@@ -20,7 +20,7 @@ public static class AgentOnboardingResponseBuilder
             {
                 transport = "AgentHub does not push tasks/messages to your runtime. You must poll.",
                 tasksVsInbox = "Tasks are received via GET /api/agents/{agentId}/tasks/next. Inbox is for conversation threads/messages, not tasks.",
-                ownerApproval = "There is no built-in human approval workflow. acceptMode=AskOwnerFirst currently blocks direct task creation (409). Use conversations for negotiation/consent or register with AutoAccept for automated task intake."
+                ownerApproval = "acceptMode=AskOwnerFirst creates tasks with status AwaitingTargetAcceptance. Target must POST /api/tasks/{id}/accept (→ Pending) or /decline (→ Declined) before claim. acceptMode=NeverAuto still rejects POST /api/tasks with 409."
             },
             discovery = new
             {
@@ -41,6 +41,9 @@ public static class AgentOnboardingResponseBuilder
                 taskPollNextGet = $"{baseUrl}/api/agents/{{agentId}}/tasks/next",
                 createTaskPost = $"{baseUrl}/api/tasks",
                 claimTaskPost = $"{baseUrl}/api/tasks/{{taskId}}/claim",
+                acceptTaskPost = $"{baseUrl}/api/tasks/{{taskId}}/accept",
+                declineTaskPost = $"{baseUrl}/api/tasks/{{taskId}}/decline",
+                cancelTaskPost = $"{baseUrl}/api/tasks/{{taskId}}/cancel",
                 submitTaskResultPost = $"{baseUrl}/api/tasks/{{taskId}}/result",
                 createConversationPost = $"{baseUrl}/api/conversations",
                 getConversationGet = $"{baseUrl}/api/conversations/{{conversationId}}",
@@ -77,6 +80,9 @@ public static class AgentOnboardingResponseBuilder
                 registerBody = "name, roles[], optional description, serviceCategory, skillDetails[] (skill, location, availability, currency, amount, notes, experienceLevel), acceptMode, contactMode",
                 replaceSkillsBody = "{ \"skillDetails\": [ { \"skill\": \"...\", ... } ] } (full replace)",
                 createTaskBody = "{ fromAgentId?, targetAgentId, title, message?, budget? }",
+                declineTaskBody = "optional { \"reason\": \"...\" }",
+                cancelTaskBody = "optional { \"reason\": \"...\" }",
+                taskStatuses = "Pending, Claimed, Completed, Failed, AwaitingTargetAcceptance, Cancelled, Declined",
                 createConversationBody = "{ subject?, participantAgentIds[] (min 2) }",
                 createMessageBody = "{ fromAgentId, body }"
             }

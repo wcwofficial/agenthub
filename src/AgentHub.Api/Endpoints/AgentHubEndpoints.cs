@@ -10,7 +10,7 @@ public static class AgentHubEndpoints
         app.MapGet("/", () => Results.Ok(new
         {
             name = "AgentHub API",
-            version = "0.4.3",
+            version = "0.5.0",
             persistence = string.IsNullOrWhiteSpace(connectionString) ? "InMemory" : "PostgreSQL",
             docs = "/swagger",
             agentOnboarding = "/api/meta/agent-onboarding",
@@ -24,6 +24,7 @@ public static class AgentHubEndpoints
                 "Task result submission",
                 "Conversation threads",
                 "Agent self-delete (authenticated)",
+                "Task acceptance flow (AskOwnerFirst) and cancel/decline",
                 "Rate limits (global + registration)",
                 "Optional registration API key",
                 "Security headers",
@@ -316,7 +317,11 @@ public static class AgentHubEndpoints
             agent.LastHeartbeatAtUtc = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync();
 
-            var pendingCount = await db.Tasks.CountAsync(t => t.TargetAgentId == id && (t.Status == TaskStatus.Pending || t.Status == TaskStatus.Claimed));
+            var pendingCount = await db.Tasks.CountAsync(t =>
+                t.TargetAgentId == id
+                && (t.Status == TaskStatus.AwaitingTargetAcceptance
+                    || t.Status == TaskStatus.Pending
+                    || t.Status == TaskStatus.Claimed));
 
             return Results.Ok(new
             {
@@ -339,11 +344,12 @@ public static class AgentHubEndpoints
             if (targetAgent.AcceptMode == AcceptMode.NeverAuto)
                 return Results.Conflict(new { error = "target agent does not accept tasks automatically" });
 
-            if (targetAgent.AcceptMode == AcceptMode.AskOwnerFirst)
-                return Results.Conflict(new { error = "target agent requires owner approval before accepting tasks" });
-
             if (string.IsNullOrWhiteSpace(request.Title))
                 return Results.BadRequest(new { error = "title is required" });
+
+            var initialStatus = targetAgent.AcceptMode == AcceptMode.AskOwnerFirst
+                ? TaskStatus.AwaitingTargetAcceptance
+                : TaskStatus.Pending;
 
             var task = new TaskEntity
             {
@@ -353,7 +359,7 @@ public static class AgentHubEndpoints
                 Title = request.Title.Trim(),
                 Message = request.Message?.Trim(),
                 Budget = request.Budget,
-                Status = TaskStatus.Pending,
+                Status = initialStatus,
                 Result = null,
                 CreatedAtUtc = DateTimeOffset.UtcNow
             };
@@ -381,8 +387,10 @@ public static class AgentHubEndpoints
                 return Results.NotFound(new { error = "agent not found" });
 
             var nextTask = await db.Tasks.AsNoTracking()
-                .Where(t => t.TargetAgentId == id && t.Status == TaskStatus.Pending)
-                .OrderBy(t => t.CreatedAtUtc)
+                .Where(t => t.TargetAgentId == id
+                    && (t.Status == TaskStatus.AwaitingTargetAcceptance || t.Status == TaskStatus.Pending))
+                .OrderBy(t => t.Status == TaskStatus.AwaitingTargetAcceptance ? 0 : 1)
+                .ThenBy(t => t.CreatedAtUtc)
                 .FirstOrDefaultAsync();
 
             return nextTask is null
@@ -410,6 +418,80 @@ public static class AgentHubEndpoints
             return Results.Ok(AgentHubMapper.ToTaskRecord(task));
         }).WithOpenApi();
 
+        app.MapPost("/api/tasks/{id:guid}/accept", async (HttpContext http, Guid id, AgentHubDbContext db) =>
+        {
+            var task = await db.Tasks.FirstOrDefaultAsync(t => t.Id == id);
+            if (task is null)
+                return Results.NotFound(new { error = "task not found" });
+
+            var authResult = await AgentHubAuth.RequireAgentAuth(http, db, task.TargetAgentId);
+            if (authResult is not null)
+                return authResult;
+
+            if (task.Status != TaskStatus.AwaitingTargetAcceptance)
+                return Results.BadRequest(new { error = "task is not awaiting acceptance" });
+
+            task.Status = TaskStatus.Pending;
+            await db.SaveChangesAsync();
+
+            return Results.Ok(AgentHubMapper.ToTaskRecord(task));
+        }).WithOpenApi();
+
+        app.MapPost("/api/tasks/{id:guid}/decline", async (HttpContext http, Guid id, DeclineTaskRequest? request, AgentHubDbContext db) =>
+        {
+            var task = await db.Tasks.FirstOrDefaultAsync(t => t.Id == id);
+            if (task is null)
+                return Results.NotFound(new { error = "task not found" });
+
+            var authResult = await AgentHubAuth.RequireAgentAuth(http, db, task.TargetAgentId);
+            if (authResult is not null)
+                return authResult;
+
+            if (task.Status != TaskStatus.AwaitingTargetAcceptance)
+                return Results.BadRequest(new { error = "task is not awaiting acceptance" });
+
+            task.Status = TaskStatus.Declined;
+            task.Result = request?.Reason?.Trim();
+            task.CompletedAtUtc = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync();
+
+            return Results.Ok(AgentHubMapper.ToTaskRecord(task));
+        }).WithOpenApi();
+
+        app.MapPost("/api/tasks/{id:guid}/cancel", async (HttpContext http, Guid id, CancelTaskRequest? request, AgentHubDbContext db) =>
+        {
+            var task = await db.Tasks.FirstOrDefaultAsync(t => t.Id == id);
+            if (task is null)
+                return Results.NotFound(new { error = "task not found" });
+
+            if (task.FromAgentId is Guid seekerId)
+            {
+                var asSeeker = await AgentHubAuth.RequireAgentAuth(http, db, seekerId);
+                if (asSeeker is not null)
+                {
+                    var asTarget = await AgentHubAuth.RequireAgentAuth(http, db, task.TargetAgentId);
+                    if (asTarget is not null)
+                        return asTarget;
+                }
+            }
+            else
+            {
+                var asTargetOnly = await AgentHubAuth.RequireAgentAuth(http, db, task.TargetAgentId);
+                if (asTargetOnly is not null)
+                    return asTargetOnly;
+            }
+
+            if (task.Status is not (TaskStatus.AwaitingTargetAcceptance or TaskStatus.Pending or TaskStatus.Claimed))
+                return Results.BadRequest(new { error = "task cannot be cancelled in its current state" });
+
+            task.Status = TaskStatus.Cancelled;
+            task.Result = request?.Reason?.Trim();
+            task.CompletedAtUtc = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync();
+
+            return Results.Ok(AgentHubMapper.ToTaskRecord(task));
+        }).WithOpenApi();
+
         app.MapPost("/api/tasks/{id:guid}/result", async (HttpContext http, Guid id, SubmitTaskResultRequest request, AgentHubDbContext db) =>
         {
             var task = await db.Tasks.FirstOrDefaultAsync(t => t.Id == id);
@@ -419,6 +501,9 @@ public static class AgentHubEndpoints
             var authResult = await AgentHubAuth.RequireAgentAuth(http, db, task.TargetAgentId);
             if (authResult is not null)
                 return authResult;
+
+            if (task.Status != TaskStatus.Claimed)
+                return Results.BadRequest(new { error = "task must be claimed before submitting a result" });
 
             task.Status = request.Success ? TaskStatus.Completed : TaskStatus.Failed;
             task.Result = request.Result?.Trim();

@@ -19,5 +19,11 @@ public enum TaskStatus
     Pending,
     Claimed,
     Completed,
-    Failed
+    Failed,
+    /// <summary>Provider must accept before work enters the normal Pending/Claimed flow (AskOwnerFirst).</summary>
+    AwaitingTargetAcceptance,
+    /// <summary>Cancelled by seeker or provider.</summary>
+    Cancelled,
+    /// <summary>Provider declined during AwaitingTargetAcceptance.</summary>
+    Declined
 }

@@ -9,6 +9,10 @@ public record CreateTaskRequest(
 
 public record SubmitTaskResultRequest(bool Success, string? Result);
 
+public record DeclineTaskRequest(string? Reason);
+
+public record CancelTaskRequest(string? Reason);
+
 public record TaskRecord(
     Guid Id,
     Guid? FromAgentId,

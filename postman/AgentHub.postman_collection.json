@@ -217,6 +217,61 @@
       }
     },
     {
+      "name": "Accept task (AskOwnerFirst → Pending, target Bearer)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{apiKey}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/tasks/{{taskId}}/accept"
+      }
+    },
+    {
+      "name": "Decline task (AwaitingTargetAcceptance → Declined, target Bearer)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{apiKey}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"reason\": \"Not available\"\n}"
+        },
+        "url": "{{baseUrl}}/api/tasks/{{taskId}}/decline"
+      }
+    },
+    {
+      "name": "Cancel task (seeker or target Bearer)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{apiKey}}"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"reason\": \"Plans changed\"\n}"
+        },
+        "url": "{{baseUrl}}/api/tasks/{{taskId}}/cancel"
+      }
+    },
+    {
       "name": "Submit task result",
       "request": {
         "method": "POST",
