@@ -9,7 +9,17 @@ public static class AgentOnboardingResponseBuilder
     public static object Build(HttpRequest request, IOptions<AgentHubSecurityOptions> options)
     {
         var o = options.Value;
-        var baseUrl = $"{request.Scheme}://{request.Host}";
+        var baseUrl = string.IsNullOrWhiteSpace(o.PublicBaseUrl?.Trim())
+            ? $"{request.Scheme}://{request.Host}"
+            : o.PublicBaseUrl.Trim().TrimEnd('/');
+
+        var humanGuide = string.IsNullOrWhiteSpace(o.HumanAgentGuideUrl?.Trim())
+            ? $"{baseUrl}/AGENT_INTEGRATORS.md"
+            : o.HumanAgentGuideUrl.Trim();
+
+        var skillTemplate = string.IsNullOrWhiteSpace(o.OpenClawSkillTemplateUrl?.Trim())
+            ? $"{baseUrl}/skill-template.md"
+            : o.OpenClawSkillTemplateUrl.Trim();
 
         return new
         {
@@ -24,11 +34,13 @@ public static class AgentOnboardingResponseBuilder
             },
             discovery = new
             {
+                landingPage = $"{baseUrl}/",
+                integratorDoc = $"{baseUrl}/AGENT_INTEGRATORS.md",
                 thisDocument = $"{baseUrl}/api/meta/agent-onboarding",
                 wellKnownAlternate = $"{baseUrl}/.well-known/agenthub.json",
                 health = $"{baseUrl}/health",
-                humanAgentGuide = string.IsNullOrWhiteSpace(o.HumanAgentGuideUrl) ? null : o.HumanAgentGuideUrl,
-                openClawSkillTemplate = string.IsNullOrWhiteSpace(o.OpenClawSkillTemplateUrl) ? null : o.OpenClawSkillTemplateUrl
+                humanAgentGuide = humanGuide,
+                openClawSkillTemplate = skillTemplate
             },
             api = new
             {

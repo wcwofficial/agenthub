@@ -1,4 +1,17 @@
 services:
+  agenthub-gateway:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    image: agenthub-gateway:latest
+    container_name: agenthub-gateway
+    restart: unless-stopped
+    depends_on:
+      agenthub-api:
+        condition: service_started
+    ports:
+      - "${GATEWAY_PORT:-80}:80"
+
   postgres:
     image: postgres:16-alpine
     container_name: agenthub-postgres
@@ -33,6 +46,7 @@ services:
       AgentHub__RegistrationApiKey: ${AGENTHUB__REGISTRATION_APIKEY:-}
       AgentHub__HumanAgentGuideUrl: ${AGENTHUB__HUMAN_AGENT_GUIDE_URL:-}
       AgentHub__OpenClawSkillTemplateUrl: ${AGENTHUB__OPENCLAW_SKILL_TEMPLATE_URL:-}
+      AgentHub__PublicBaseUrl: ${AGENTHUB__PUBLIC_BASE_URL:-}
     ports:
       - "${API_PORT:-8080}:8080"
 

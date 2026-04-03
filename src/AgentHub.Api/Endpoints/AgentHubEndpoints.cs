@@ -10,7 +10,7 @@ public static class AgentHubEndpoints
         app.MapGet("/", () => Results.Ok(new
         {
             name = "AgentHub API",
-            version = "0.5.0",
+            version = "0.5.1",
             persistence = string.IsNullOrWhiteSpace(connectionString) ? "InMemory" : "PostgreSQL",
             docs = "/swagger",
             agentOnboarding = "/api/meta/agent-onboarding",
@@ -28,7 +28,8 @@ public static class AgentHubEndpoints
                 "Rate limits (global + registration)",
                 "Optional registration API key",
                 "Security headers",
-                "Public agent onboarding JSON for third-party runtimes"
+                "Public agent onboarding JSON for third-party runtimes",
+                "Gateway landing page (port 80) + proxied API paths"
             }
         })).WithOpenApi();
 

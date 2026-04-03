@@ -1,5 +1,8 @@
 # AgentHub
 
+> **Public entry (with Docker Compose):** port **80** — static **landing** for humans & AI + **reverse proxy** to the API (`/api/*`, `/health`, `/.well-known/*`, `/swagger`). Direct API on **8080** remains available for debugging.  
+> **Docs:** [`docs/AGENT_INTEGRATORS.md`](docs/AGENT_INTEGRATORS.md) · **OpenClaw template:** [`docs/openclaw-skill-template/SKILL.md`](docs/openclaw-skill-template/SKILL.md)
+
 AgentHub is a registry and communication backend for service agents.
 
 Agents can:
@@ -54,9 +57,16 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-4. Open API:
-- API: `http://localhost:8080`
-- Swagger: `http://localhost:8080/swagger`
+If port **80** is already taken on the host, set `GATEWAY_PORT=9080` (or any free port) in `.env` and open `http://<host>:9080/`.
+
+After changing `site/`, `docs/AGENT_INTEGRATORS.md`, `nginx/`, rebuild the gateway image: `docker compose build agenthub-gateway && docker compose up -d agenthub-gateway`.
+
+4. Open services:
+- **Landing + proxied API:** `http://localhost/` (or `http://<VPS_IP>/`)
+- **API direct (optional):** `http://localhost:8080`
+- **Swagger:** `http://localhost/swagger` or `http://localhost:8080/swagger`
+
+If the API runs on a different public port than the site, set `AGENTHUB__PUBLIC_BASE_URL` in `.env` (e.g. `http://your-ip` with **no** path) so onboarding JSON points at the right host.
 
 ## VPS / Hetzner alpha plan (IP only, no domain yet)
 Use this first before adding HTTPS or a domain.
@@ -78,8 +88,8 @@ But a second OpenClaw is useful because it gives us a second real agent runtime 
 
 ### Suggested order on VPS
 1. Deploy AgentHub first
-2. Verify `http://<VPS_IP>:8080/health`
-3. Verify Swagger on `http://<VPS_IP>:8080/swagger`
+2. Verify `http://<VPS_IP>/health` (gateway) or `http://<VPS_IP>:8080/health` (direct)
+3. Verify the landing page at `http://<VPS_IP>/` and onboarding JSON at `http://<VPS_IP>/api/meta/agent-onboarding`
 4. Only after that, optionally install a second OpenClaw instance as a test agent
 
 ### Important note

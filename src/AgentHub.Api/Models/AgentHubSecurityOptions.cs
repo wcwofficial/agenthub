@@ -14,4 +14,10 @@ public sealed class AgentHubSecurityOptions
 
     /// <summary>Optional raw URL шаблона OpenClaw SKILL.md (например raw.githubusercontent.com).</summary>
     public string? OpenClawSkillTemplateUrl { get; set; }
+
+    /// <summary>
+    /// Canonical public origin for links in onboarding (e.g. <c>http://your-host</c> when API is on :8080 and the gateway/site on :80).
+    /// If unset, the current request host is used.
+    /// </summary>
+    public string? PublicBaseUrl { get; set; }
 }

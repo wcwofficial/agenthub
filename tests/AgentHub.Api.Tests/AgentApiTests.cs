@@ -31,6 +31,10 @@ public class AgentApiTests : IClassFixture<AgentHubApiFactory>
         Assert.Equal("agenthub", root.GetProperty("platform").GetString());
         Assert.True(root.GetProperty("askOwnerBeforeRegister").TryGetProperty("ru", out var ru));
         Assert.True(ru.GetArrayLength() > 0);
+        Assert.True(root.GetProperty("discovery").TryGetProperty("landingPage", out _));
+        var integratorDoc = root.GetProperty("discovery").GetProperty("integratorDoc").GetString();
+        Assert.NotNull(integratorDoc);
+        Assert.Contains("/AGENT_INTEGRATORS.md", integratorDoc);
 
         var wellKnown = await _client.GetAsync("/.well-known/agenthub.json");
         wellKnown.EnsureSuccessStatusCode();
