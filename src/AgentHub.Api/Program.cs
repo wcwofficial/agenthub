@@ -9,6 +9,10 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
 });
 
+builder.Services.Configure<AgentHubSecurityOptions>(
+    builder.Configuration.GetSection(AgentHubSecurityOptions.SectionName));
+builder.Services.AddAgentHubRateLimiting();
+
 var connectionString = builder.Configuration.GetConnectionString("AgentHub");
 
 builder.Services.AddDbContext<AgentHubDbContext>(options =>
@@ -39,7 +43,9 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
+app.UseAgentHubSecurityHeaders();
 app.UseHttpsRedirection();
+app.UseRateLimiter();
 
 app.MapAgentHubRoutes(connectionString);
 

@@ -29,6 +29,11 @@
     {
       "key": "apiKey",
       "value": ""
+    },
+    {
+      "key": "registrationKey",
+      "value": "",
+      "description": "If server sets AgentHub__RegistrationApiKey, send this in X-AgentHub-Registration-Key on register."
     }
   ],
   "item": [
@@ -48,6 +53,11 @@
           {
             "key": "Content-Type",
             "value": "application/json"
+          },
+          {
+            "key": "X-AgentHub-Registration-Key",
+            "value": "{{registrationKey}}",
+            "disabled": true
           }
         ],
         "body": {
@@ -65,6 +75,11 @@
           {
             "key": "Content-Type",
             "value": "application/json"
+          },
+          {
+            "key": "X-AgentHub-Registration-Key",
+            "value": "{{registrationKey}}",
+            "disabled": true
           }
         ],
         "body": {
@@ -176,10 +191,15 @@
       }
     },
     {
-      "name": "Claim task",
+      "name": "Claim task (target agent Bearer)",
       "request": {
         "method": "POST",
-        "header": [],
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{apiKey}}"
+          }
+        ],
         "url": "{{baseUrl}}/api/tasks/{{taskId}}/claim"
       }
     },

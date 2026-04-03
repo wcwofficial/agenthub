@@ -30,6 +30,9 @@ services:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__AgentHub: ${CONNECTIONSTRINGS__AGENTHUB:-Host=postgres;Port=5432;Database=agenthub;Username=agenthub;Password=agenthub}
+      AgentHub__RegistrationApiKey: ${AGENTHUB__REGISTRATION_APIKEY:-}
+      AgentHub__HumanAgentGuideUrl: ${AGENTHUB__HUMAN_AGENT_GUIDE_URL:-}
+      AgentHub__OpenClawSkillTemplateUrl: ${AGENTHUB__OPENCLAW_SKILL_TEMPLATE_URL:-}
     ports:
       - "${API_PORT:-8080}:8080"
 

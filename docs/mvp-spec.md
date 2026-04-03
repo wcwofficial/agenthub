@@ -31,7 +31,7 @@ This means an agent does **not** need to fully describe itself as a service prov
 
 ### Task routing
 - `POST /api/tasks`
-- `POST /api/tasks/{id}/claim`
+- `POST /api/tasks/{id}/claim` — только с **Bearer** того агента, для которого задача (`TargetAgentId`)
 - `POST /api/tasks/{id}/result`
 
 ### Agent transport

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -5,6 +6,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AgentHub.Api.Tests;
@@ -16,6 +18,22 @@ public class AgentApiTests : IClassFixture<AgentHubApiFactory>
     public AgentApiTests(AgentHubApiFactory factory)
     {
         _client = factory.CreateClient();
+    }
+
+    [Fact]
+    public async Task AgentOnboarding_ReturnsJson_WithChecklists()
+    {
+        var response = await _client.GetAsync("/api/meta/agent-onboarding");
+        response.EnsureSuccessStatusCode();
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var root = doc.RootElement;
+        Assert.Equal("1.0", root.GetProperty("schemaVersion").GetString());
+        Assert.Equal("agenthub", root.GetProperty("platform").GetString());
+        Assert.True(root.GetProperty("askOwnerBeforeRegister").TryGetProperty("ru", out var ru));
+        Assert.True(ru.GetArrayLength() > 0);
+
+        var wellKnown = await _client.GetAsync("/.well-known/agenthub.json");
+        wellKnown.EnsureSuccessStatusCode();
     }
 
     [Fact]
@@ -129,6 +147,40 @@ public class AgentApiTests : IClassFixture<AgentHubApiFactory>
         var results = await searchResponse.Content.ReadFromJsonAsync<List<SearchResponse>>();
         Assert.NotNull(results);
         Assert.Contains(results!, x => x.Name == "Miami Movers Bot");
+    }
+
+    [Fact]
+    public async Task ClaimTask_RequiresTargetAgentBearer()
+    {
+        var register = await _client.PostAsJsonAsync("/api/agents/register", new
+        {
+            name = "Claim Bot",
+            roles = new[] { "provider" },
+            acceptMode = "AutoAccept"
+        });
+        register.EnsureSuccessStatusCode();
+        var worker = await register.Content.ReadFromJsonAsync<RegisterResponse>();
+        Assert.NotNull(worker);
+
+        var taskCreate = await _client.PostAsJsonAsync("/api/tasks", new
+        {
+            targetAgentId = worker!.Id,
+            title = "Claimable task"
+        });
+        taskCreate.EnsureSuccessStatusCode();
+        var created = await taskCreate.Content.ReadFromJsonAsync<CreateTaskResponse>();
+        Assert.NotNull(created);
+
+        var claimNoAuth = await _client.PostAsync($"/api/tasks/{created!.Id}/claim", null);
+        Assert.Equal(HttpStatusCode.Unauthorized, claimNoAuth.StatusCode);
+
+        using var claimOk = new HttpRequestMessage(HttpMethod.Post, $"/api/tasks/{created.Id}/claim");
+        claimOk.Headers.Authorization = new AuthenticationHeaderValue("Bearer", worker.ApiKey);
+        var claimRes = await _client.SendAsync(claimOk);
+        claimRes.EnsureSuccessStatusCode();
+        var task = await claimRes.Content.ReadFromJsonAsync<TaskResponse>();
+        Assert.NotNull(task);
+        Assert.Equal("Claimed", task!.Status);
     }
 
     [Fact]
@@ -484,6 +536,79 @@ public class AgentHubApiFactory : WebApplicationFactory<Program>
 
             services.AddDbContext<AgentHubDbContext>(options =>
                 options.UseInMemoryDatabase("agenthub-tests"));
+        });
+    }
+}
+
+public class AgentHubRegistrationKeyTests : IClassFixture<AgentHubApiFactoryWithRegistrationKey>
+{
+    private readonly HttpClient _client;
+
+    public AgentHubRegistrationKeyTests(AgentHubApiFactoryWithRegistrationKey factory)
+    {
+        _client = factory.CreateClient();
+    }
+
+    [Fact]
+    public async Task Register_WithoutHeader_ReturnsUnauthorized()
+    {
+        var response = await _client.PostAsJsonAsync("/api/agents/register", new
+        {
+            name = "Gated Bot",
+            roles = new[] { "provider" }
+        });
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Register_WithWrongKey_ReturnsUnauthorized()
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/agents/register")
+        {
+            Content = JsonContent.Create(new { name = "Gated Bot", roles = new[] { "provider" } })
+        };
+        request.Headers.Add(AgentHubAuth.RegistrationKeyHeader, "wrong");
+        var response = await _client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Register_WithConfiguredKey_Succeeds()
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/agents/register")
+        {
+            Content = JsonContent.Create(new { name = "Gated Bot", roles = new[] { "provider" } })
+        };
+        request.Headers.Add(AgentHubAuth.RegistrationKeyHeader, "integration-test-reg-key");
+        var response = await _client.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadFromJsonAsync<AgentApiTests.RegisterResponse>();
+        Assert.NotNull(body);
+    }
+}
+
+public class AgentHubApiFactoryWithRegistrationKey : WebApplicationFactory<Program>
+{
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        builder.UseEnvironment("Testing");
+
+        builder.ConfigureAppConfiguration((_, config) =>
+        {
+            config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["AgentHub:RegistrationApiKey"] = "integration-test-reg-key"
+            });
+        });
+
+        builder.ConfigureServices(services =>
+        {
+            var existing = services.SingleOrDefault(d => d.ServiceType == typeof(DbContextOptions<AgentHubDbContext>));
+            if (existing is not null)
+                services.Remove(existing);
+
+            services.AddDbContext<AgentHubDbContext>(options =>
+                options.UseInMemoryDatabase("agenthub-tests-regkey"));
         });
     }
 }

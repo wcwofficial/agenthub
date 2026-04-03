@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace AgentHub.Api;
 
@@ -9,9 +10,11 @@ public static class AgentHubEndpoints
         app.MapGet("/", () => Results.Ok(new
         {
             name = "AgentHub API",
-            version = "0.4.0",
+            version = "0.4.2",
             persistence = string.IsNullOrWhiteSpace(connectionString) ? "InMemory" : "PostgreSQL",
             docs = "/swagger",
+            agentOnboarding = "/api/meta/agent-onboarding",
+            wellKnown = "/.well-known/agenthub.json",
             features = new[]
             {
                 "Agent registration",
@@ -19,14 +22,36 @@ public static class AgentHubEndpoints
                 "Task creation",
                 "Agent polling inbox",
                 "Task result submission",
-                "Conversation threads"
+                "Conversation threads",
+                "Rate limits (global + registration)",
+                "Optional registration API key",
+                "Security headers",
+                "Public agent onboarding JSON for third-party runtimes"
             }
         })).WithOpenApi();
 
         app.MapGet("/health", () => Results.Ok(new { ok = true })).WithOpenApi();
 
-        app.MapPost("/api/agents/register", async (RegisterAgentRequest request, AgentHubDbContext db) =>
+        app.MapGet("/api/meta/agent-onboarding", (HttpContext http, IOptions<AgentHubSecurityOptions> options) =>
+            Results.Ok(AgentOnboardingResponseBuilder.Build(http.Request, options)))
+            .WithOpenApi()
+            .WithTags("Meta");
+
+        app.MapGet("/.well-known/agenthub.json", (HttpContext http, IOptions<AgentHubSecurityOptions> options) =>
+            Results.Ok(AgentOnboardingResponseBuilder.Build(http.Request, options)))
+            .WithOpenApi()
+            .WithTags("Meta");
+
+        app.MapPost("/api/agents/register", async (
+            RegisterAgentRequest request,
+            AgentHubDbContext db,
+            HttpContext http,
+            IOptions<AgentHubSecurityOptions> security) =>
         {
+            var regGate = AgentHubAuth.RequireRegistrationKeyIfConfigured(http, security.Value);
+            if (regGate is not null)
+                return regGate;
+
             if (string.IsNullOrWhiteSpace(request.Name))
                 return Results.BadRequest(new { error = "name is required" });
 
@@ -78,7 +103,9 @@ public static class AgentHubEndpoints
                 agent.ApiKey,
                 message = "Agent registered successfully"
             });
-        }).WithOpenApi();
+        })
+        .RequireRateLimiting("register")
+        .WithOpenApi();
 
         app.MapGet("/api/agents/{id:guid}", async (Guid id, AgentHubDbContext db) =>
         {
@@ -314,11 +341,15 @@ public static class AgentHubEndpoints
                 : Results.Ok(AgentHubMapper.ToTaskRecord(nextTask));
         }).WithOpenApi();
 
-        app.MapPost("/api/tasks/{id:guid}/claim", async (Guid id, AgentHubDbContext db) =>
+        app.MapPost("/api/tasks/{id:guid}/claim", async (HttpContext http, Guid id, AgentHubDbContext db) =>
         {
             var task = await db.Tasks.FirstOrDefaultAsync(t => t.Id == id);
             if (task is null)
                 return Results.NotFound(new { error = "task not found" });
+
+            var authResult = await AgentHubAuth.RequireAgentAuth(http, db, task.TargetAgentId);
+            if (authResult is not null)
+                return authResult;
 
             if (task.Status != TaskStatus.Pending)
                 return Results.BadRequest(new { error = "task is not pending" });

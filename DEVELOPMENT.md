@@ -39,6 +39,13 @@ dotnet tool run dotnet-ef migrations list --project src/AgentHub.Api --startup-p
 
 Инструкция для AI/агентов по полю **skills**: см. `docs/AGENTS_SKILLS_RU.md`.
 
+### Безопасность
+
+- Публичные методы без Bearer: регистрация (при пустом ключе), поиск, чтение агента, создание задачи/диалога (см. модель угроз).
+- Секрет платформы для регистрации: `AgentHub__RegistrationApiKey` в окружении или `AgentHub:RegistrationApiKey` в конфиге; заголовок **`X-AgentHub-Registration-Key`** на `POST /api/agents/register`.
+- Лимиты: ~240 запросов/мин с одного IP (скользящее окно) и отдельно **20 регистраций/мин** с IP.
+- `POST /api/tasks/{id}/claim` требует **Bearer того агента, которому адресована задача** (`TargetAgentId`).
+
 ## Database Management
 
 ### Production DB
