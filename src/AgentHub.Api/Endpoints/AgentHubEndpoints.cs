@@ -10,7 +10,7 @@ public static class AgentHubEndpoints
         app.MapGet("/", () => Results.Ok(new
         {
             name = "AgentHub API",
-            version = "0.4.2",
+            version = "0.4.3",
             persistence = string.IsNullOrWhiteSpace(connectionString) ? "InMemory" : "PostgreSQL",
             docs = "/swagger",
             agentOnboarding = "/api/meta/agent-onboarding",
@@ -23,6 +23,7 @@ public static class AgentHubEndpoints
                 "Agent polling inbox",
                 "Task result submission",
                 "Conversation threads",
+                "Agent self-delete (authenticated)",
                 "Rate limits (global + registration)",
                 "Optional registration API key",
                 "Security headers",
@@ -42,7 +43,7 @@ public static class AgentHubEndpoints
             .WithOpenApi()
             .WithTags("Meta");
 
-        app.MapPost("/api/agents/register", async (
+        var registerEndpoint = app.MapPost("/api/agents/register", async (
             RegisterAgentRequest request,
             AgentHubDbContext db,
             HttpContext http,
@@ -103,9 +104,12 @@ public static class AgentHubEndpoints
                 agent.ApiKey,
                 message = "Agent registered successfully"
             });
-        })
-        .RequireRateLimiting("register")
-        .WithOpenApi();
+        });
+
+        if (!app.Environment.IsEnvironment("Testing"))
+            registerEndpoint.RequireRateLimiting("register");
+
+        registerEndpoint.WithOpenApi();
 
         app.MapGet("/api/agents/{id:guid}", async (Guid id, AgentHubDbContext db) =>
         {
@@ -116,6 +120,51 @@ public static class AgentHubEndpoints
             return agent is null
                 ? Results.NotFound(new { error = "agent not found" })
                 : Results.Ok(AgentHubMapper.ToAgentRecord(agent));
+        }).WithOpenApi();
+
+        app.MapDelete("/api/agents/{id:guid}", async (HttpContext http, Guid id, AgentHubDbContext db) =>
+        {
+            var authResult = await AgentHubAuth.RequireAgentAuth(http, db, id);
+            if (authResult is not null)
+                return authResult;
+
+            var agent = await db.Agents.FirstOrDefaultAsync(a => a.Id == id);
+            if (agent is null)
+                return Results.NotFound(new { error = "agent not found" });
+
+            var participantFilter = "|" + id.ToString() + "|";
+            var touchedConversations = await db.Conversations
+                .Where(c => ("|" + c.ParticipantAgentIds + "|").Contains(participantFilter))
+                .ToListAsync();
+
+            var conversationIdsToRemove = new List<Guid>();
+            foreach (var conv in touchedConversations)
+            {
+                var remaining = AgentHubFormatHelpers.SplitGuidList(conv.ParticipantAgentIds)
+                    .Where(g => g != id)
+                    .Distinct()
+                    .ToArray();
+                if (remaining.Length < 2)
+                    conversationIdsToRemove.Add(conv.Id);
+                else
+                    conv.ParticipantAgentIds = AgentHubFormatHelpers.JoinGuidList(remaining);
+            }
+
+            if (conversationIdsToRemove.Count > 0)
+            {
+                var messages = await db.Messages.Where(m => conversationIdsToRemove.Contains(m.ConversationId)).ToListAsync();
+                db.Messages.RemoveRange(messages);
+                var dropConversations = touchedConversations.Where(c => conversationIdsToRemove.Contains(c.Id)).ToList();
+                db.Conversations.RemoveRange(dropConversations);
+            }
+
+            var tasks = await db.Tasks.Where(t => t.TargetAgentId == id || t.FromAgentId == id).ToListAsync();
+            db.Tasks.RemoveRange(tasks);
+
+            db.Agents.Remove(agent);
+            await db.SaveChangesAsync();
+
+            return Results.NoContent();
         }).WithOpenApi();
 
         app.MapGet("/api/agents/search", async (
@@ -459,8 +508,9 @@ public static class AgentHubEndpoints
             if (!agentExists)
                 return Results.NotFound(new { error = "agent not found" });
 
+            var participantFilter = "|" + id.ToString() + "|";
             var conversations = await db.Conversations.AsNoTracking()
-                .Where(c => c.ParticipantAgentIds.Contains(id.ToString()))
+                .Where(c => ("|" + c.ParticipantAgentIds + "|").Contains(participantFilter))
                 .OrderByDescending(c => c.CreatedAtUtc)
                 .ToListAsync();
 

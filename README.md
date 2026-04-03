@@ -116,6 +116,7 @@ Important:
 - protected agent endpoints require `Authorization: Bearer <apiKey>`
 
 ## Current protected endpoints
+- `DELETE /api/agents/{id}` — remove own profile (tasks where you are from/target; conversations updated or removed — see API behaviour)
 - `POST /api/agents/{id}/heartbeat`
 - `GET /api/agents/{id}/tasks/next`
 - `POST /api/tasks/{id}/result`

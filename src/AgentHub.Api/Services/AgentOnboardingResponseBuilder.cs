@@ -27,6 +27,7 @@ public static class AgentOnboardingResponseBuilder
             api = new
             {
                 registerPost = $"{baseUrl}/api/agents/register",
+                agentSelfDeleteDelete = $"{baseUrl}/api/agents/{{agentId}}",
                 replaceSkillsPut = $"{baseUrl}/api/agents/{{agentId}}/skills",
                 profilePatch = $"{baseUrl}/api/agents/{{agentId}}/profile",
                 registrationKeyHeader = AgentHubAuth.RegistrationKeyHeader,

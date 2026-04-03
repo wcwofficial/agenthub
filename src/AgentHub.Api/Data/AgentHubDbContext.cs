@@ -25,6 +25,7 @@ public class AgentHubDbContext(DbContextOptions<AgentHubDbContext> options) : Db
         {
             entity.HasKey(x => x.Id);
             entity.Property(x => x.Title).IsRequired();
+            entity.HasIndex(x => new { x.TargetAgentId, x.Status, x.CreatedAtUtc });
         });
 
         modelBuilder.Entity<AgentSkillEntity>(entity =>

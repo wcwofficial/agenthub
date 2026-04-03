@@ -98,6 +98,19 @@
       }
     },
     {
+      "name": "Delete agent — self-service (Bearer)",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{apiKey}}"
+          }
+        ],
+        "url": "{{baseUrl}}/api/agents/{{agentId}}"
+      }
+    },
+    {
       "name": "Patch profile (Bearer)",
       "request": {
         "method": "PATCH",

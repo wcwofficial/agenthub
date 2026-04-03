@@ -362,6 +362,128 @@ public class AgentApiTests : IClassFixture<AgentHubApiFactory>
     }
 
     [Fact]
+    public async Task SelfDelete_WithoutBearer_ReturnsUnauthorized()
+    {
+        var register = await _client.PostAsJsonAsync("/api/agents/register", new
+        {
+            name = "Leaving Bot",
+            roles = new[] { "seeker" }
+        });
+        register.EnsureSuccessStatusCode();
+        var agent = await register.Content.ReadFromJsonAsync<RegisterResponse>();
+        Assert.NotNull(agent);
+
+        var response = await _client.DeleteAsync($"/api/agents/{agent!.Id}");
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task SelfDelete_WithBearer_RemovesProfile_ReturnsNoContent()
+    {
+        var register = await _client.PostAsJsonAsync("/api/agents/register", new
+        {
+            name = "Gone Bot",
+            roles = new[] { "provider" }
+        });
+        register.EnsureSuccessStatusCode();
+        var agent = await register.Content.ReadFromJsonAsync<RegisterResponse>();
+        Assert.NotNull(agent);
+
+        using var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, $"/api/agents/{agent!.Id}");
+        deleteRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", agent.ApiKey);
+        var deleteResponse = await _client.SendAsync(deleteRequest);
+        Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
+
+        var get = await _client.GetAsync($"/api/agents/{agent.Id}");
+        Assert.Equal(HttpStatusCode.NotFound, get.StatusCode);
+    }
+
+    [Fact]
+    public async Task SelfDelete_RemovesTasks_LinkedAsTargetOrSource()
+    {
+        var seekerReg = await _client.PostAsJsonAsync("/api/agents/register", new
+        {
+            name = "Seeker X",
+            roles = new[] { "seeker" }
+        });
+        seekerReg.EnsureSuccessStatusCode();
+        var seeker = await seekerReg.Content.ReadFromJsonAsync<RegisterResponse>();
+        Assert.NotNull(seeker);
+
+        var providerReg = await _client.PostAsJsonAsync("/api/agents/register", new
+        {
+            name = "Provider X",
+            roles = new[] { "provider" },
+            acceptMode = "AutoAccept"
+        });
+        providerReg.EnsureSuccessStatusCode();
+        var provider = await providerReg.Content.ReadFromJsonAsync<RegisterResponse>();
+        Assert.NotNull(provider);
+
+        var taskReg = await _client.PostAsJsonAsync("/api/tasks", new
+        {
+            fromAgentId = seeker!.Id,
+            targetAgentId = provider!.Id,
+            title = "Job"
+        });
+        taskReg.EnsureSuccessStatusCode();
+        var created = await taskReg.Content.ReadFromJsonAsync<CreateTaskResponse>();
+        Assert.NotNull(created);
+
+        using var deleteSeeker = new HttpRequestMessage(HttpMethod.Delete, $"/api/agents/{seeker.Id}");
+        deleteSeeker.Headers.Authorization = new AuthenticationHeaderValue("Bearer", seeker.ApiKey);
+        var delSeekerResp = await _client.SendAsync(deleteSeeker);
+        delSeekerResp.EnsureSuccessStatusCode();
+
+        using var deleteProvider = new HttpRequestMessage(HttpMethod.Delete, $"/api/agents/{provider.Id}");
+        deleteProvider.Headers.Authorization = new AuthenticationHeaderValue("Bearer", provider.ApiKey);
+        var delProvResp = await _client.SendAsync(deleteProvider);
+        delProvResp.EnsureSuccessStatusCode();
+
+        Assert.Equal(HttpStatusCode.NotFound, (await _client.GetAsync($"/api/agents/{seeker.Id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await _client.GetAsync($"/api/agents/{provider.Id}")).StatusCode);
+    }
+
+    [Fact]
+    public async Task SelfDelete_InThreePartyConversation_KeepsThreadWithRemainingParticipants()
+    {
+        var regs = new List<RegisterResponse>();
+        for (var i = 0; i < 3; i++)
+        {
+            var r = await _client.PostAsJsonAsync("/api/agents/register", new
+            {
+                name = $"Party {i}",
+                roles = new[] { "seeker" }
+            });
+            r.EnsureSuccessStatusCode();
+            var a = await r.Content.ReadFromJsonAsync<RegisterResponse>();
+            Assert.NotNull(a);
+            regs.Add(a);
+        }
+
+        var convResp = await _client.PostAsJsonAsync("/api/conversations", new
+        {
+            subject = "group",
+            participantAgentIds = new[] { regs[0].Id, regs[1].Id, regs[2].Id }
+        });
+        convResp.EnsureSuccessStatusCode();
+        var conv = await convResp.Content.ReadFromJsonAsync<ConversationResponse>();
+        Assert.NotNull(conv);
+
+        using var del = new HttpRequestMessage(HttpMethod.Delete, $"/api/agents/{regs[1].Id}");
+        del.Headers.Authorization = new AuthenticationHeaderValue("Bearer", regs[1].ApiKey);
+        (await _client.SendAsync(del)).EnsureSuccessStatusCode();
+
+        var getConv = await _client.GetAsync($"/api/conversations/{conv!.Id}");
+        getConv.EnsureSuccessStatusCode();
+        var after = await getConv.Content.ReadFromJsonAsync<ConversationResponse>();
+        Assert.NotNull(after);
+        Assert.Equal(2, after!.ParticipantAgentIds.Length);
+        Assert.Contains(regs[0].Id, after.ParticipantAgentIds);
+        Assert.Contains(regs[2].Id, after.ParticipantAgentIds);
+    }
+
+    [Fact]
     public async Task ProtectedAgentEndpoint_WithoutBearerToken_ReturnsUnauthorized()
     {
         var register = await _client.PostAsJsonAsync("/api/agents/register", new
