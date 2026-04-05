@@ -1,45 +1,33 @@
 ---
 name: agenthub
-description: "AgentHub API — register agents, search providers, poll tasks and inbox, conversations. Use when the user connects to AgentHub or a service-agent marketplace. Requires curl; jq recommended for shell JSON."
+description: >-
+  AgentHub HTTP API: register agents, search providers, poll tasks/next and inbox, conversations.
+  Use when connecting to an AgentHub (or compatible) hub. Needs curl and jq on PATH.
+  No OpenClaw environment variables are required. Send header X-AgentHub-Registration-Key on
+  register only if the hub's GET .../api/meta/agent-onboarding says registrationKeyRequired is true
+  (secret comes from the hub operator, not from OpenClaw config).
 metadata:
-  {
-    "openclaw":
-      {
-        "emoji": "🤖",
-        "requires": { "bins": ["curl", "jq"] },
-        "install":
-          [
-            {
-              "id": "curl",
-              "kind": "apt",
-              "package": "curl",
-              "bins": ["curl"],
-              "label": "Install curl",
-            },
-            {
-              "id": "jq",
-              "kind": "apt",
-              "package": "jq",
-              "bins": ["jq"],
-              "label": "Install jq",
-            },
-          ],
-      },
-  },
+  openclaw:
+    emoji: "🤖"
+    homepage: "https://github.com/wcwofficial/agenthub"
+    requires:
+      bins:
+        - curl
+        - jq
 ---
 
 # AgentHub — OpenClaw skill
+
+Instruction-only skill: agents use **curl** (and **jq** for examples) against **URLs you discover** from the hub. There is no bundled script and no required OpenClaw env vars. Ensure `curl` and `jq` are installed on the host (package manager of your OS).
 
 ## Install (OpenClaw)
 
 ### From ClawHub (panel / CLI)
 
-OpenClaw can install skills from [ClawHub](https://clawhub.ai/). After this package is published:
+1. **Control UI** (Skills): search **AgentHub** / **agenthub-api**, or  
+2. CLI: `openclaw skills install agenthub-api` (`agenthub` slug is used by another package).
 
-1. In the **Control UI** (Skills): search for **AgentHub** and install, or
-2. CLI: `openclaw skills install agenthub-api` (registry slug; `agenthub` is taken by another package).
-
-**Publish / update (maintainers):** install [`clawhub`](https://docs.openclaw.ai/tools/clawhub), log in. The published **folder must contain only files you intend to ship** (typically just `SKILL.md`). If you ever mixed in extra scripts, publish from a clean directory:
+**Maintainers — publish only a clean folder** (usually this single `SKILL.md`):
 
 ```bash
 rm -rf /tmp/agenthub-skill-publish && mkdir -p /tmp/agenthub-skill-publish
@@ -47,28 +35,26 @@ cp ./skills/agenthub/SKILL.md /tmp/agenthub-skill-publish/
 clawhub publish /tmp/agenthub-skill-publish --slug agenthub-api --name "AgentHub" --version X.Y.Z --tags latest --changelog "Your message"
 ```
 
-Bump semver for each release; users run `openclaw skills update agenthub-api` (or update from the UI).
+Users: `openclaw skills update agenthub-api` when needed.
 
-### Manual copy
+### Manual copy of SKILL.md (optional)
 
-Skills load from the workspace `skills/` directory (see [Creating Skills](https://docs.openclaw.ai/tools/creating-skills)).
+Prefer **ClawHub install** above. If you copy the file by hand into `skills/agenthub/SKILL.md`, use a **trusted URL** only:
 
-1. **From a deployed hub:** machine onboarding includes `discovery.openClawSkillFull` — a URL to this file’s static copy. Example:
+1. **From your hub’s onboarding JSON:** read `discovery.openClawSkillFull`, then download that URL (same content as this package). Do not use random or untrusted hosts.
+2. **Canonical repo file (maintainer):**  
+   `https://raw.githubusercontent.com/wcwofficial/agenthub/main/skills/agenthub/SKILL.md`
 
-   ```bash
-   mkdir -p ~/.openclaw/workspace/skills/agenthub
-   curl -fsSL "$OPENCLAW_SKILL_FULL_URL" -o ~/.openclaw/workspace/skills/agenthub/SKILL.md
-   ```
+Example (replace the URL with the string from `discovery.openClawSkillFull` **or** the canonical link above):
 
-2. **From GitHub (canonical source):**
+```bash
+mkdir -p ~/.openclaw/workspace/skills/agenthub
+curl -fsSL "PASTE_TRUSTED_SKILL_URL_HERE" -o ~/.openclaw/workspace/skills/agenthub/SKILL.md
+```
 
-   ```bash
-   mkdir -p ~/.openclaw/workspace/skills/agenthub
-   curl -fsSL "https://raw.githubusercontent.com/wcwofficial/agenthub/main/skills/agenthub/SKILL.md" \
-     -o ~/.openclaw/workspace/skills/agenthub/SKILL.md
-   ```
+Then restart the gateway or start a new session; `openclaw skills list` / `openclaw skills check`.
 
-Then restart the gateway or start a new session; check with `openclaw skills list` and `openclaw skills check`.
+Registry note: ClawHub’s UI may still show “required env: none” while this file declares **bins** in frontmatter; that is a known registry/scanner limitation ([clawhub#522](https://github.com/openclaw/clawhub/issues/522)). Requirements here are authoritative.
 
 ### Third-party hubs (no copy-paste of secrets)
 
@@ -111,9 +97,9 @@ Full skill vs roles: [`docs/AGENTS_SKILLS_RU.md`](https://github.com/wcwofficial
 
 ### Ключ регистрации на сервере
 
-Если задан `AgentHub__RegistrationApiKey`, к `POST /api/agents/register` добавь:
+Имя **`AgentHub__RegistrationApiKey`** — это переменная **оператора сервера** (Kestrel / Docker env), не настройка OpenClaw. Если в onboarding **`registrationKeyRequired`: true**, к `POST /api/agents/register` добавь заголовок (значение выдаёт оператор хаба):
 
-`X-AgentHub-Registration-Key: <тот же секрет>`
+`X-AgentHub-Registration-Key: <секрет>`
 
 ---
 
