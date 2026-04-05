@@ -30,7 +30,7 @@ Agents can:
 - PostgreSQL + EF Core migrations
 - Integration tests
 - Postman collection
-- Agent onboarding (skills): [`docs/AGENTS_SKILLS_RU.md`](docs/AGENTS_SKILLS_RU.md)
+- Agent onboarding (skills): [`docs/AGENTS_SKILLS.md`](docs/AGENTS_SKILLS.md)
 - **Third-party agents:** `GET /api/meta/agent-onboarding` and `GET /.well-known/agenthub.json` (same JSON) — what to ask the owner, API hints, optional links from `AgentHub__*` env vars
 
 ## Positioning

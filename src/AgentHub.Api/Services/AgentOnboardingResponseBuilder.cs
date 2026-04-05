@@ -72,13 +72,6 @@ public static class AgentOnboardingResponseBuilder
             },
             askOwnerBeforeRegister = new
             {
-                ru = new[]
-                {
-                    "Нужен ли владельцу только поиск исполнителей (seeker), или ещё входящие заказы как исполнителю (provider / оба)?",
-                    "Если нужны входящие задачи: спроси у владельца точные формулировки навыков для skillDetails (как их будут искать в поиске). Не придумывай список сам.",
-                    "Можно зарегистрироваться минимально, затем в том же диалоге спросить про услуги владельца и вызвать PUT .../skills.",
-                    "После регистрации сохрани id и apiKey; для защищённых методов используй Authorization: Bearer {apiKey}."
-                },
                 en = new[]
                 {
                     "Does the owner need only marketplace search (seeker), or also incoming work as a provider (provider / both)?",

@@ -1,13 +1,13 @@
 # Development override
-# Использовать: docker-compose -f docker-compose.yml -f docker-compose.override.yml up
-# Или просто: docker-compose up (автоматически подхватит override)
+# Run: docker compose -f docker-compose.yml -f docker-compose.override.yml up
+# Or: docker compose up (Compose merges override automatically)
 
 services:
   postgres:
     ports:
-      - "5433:5432"  # Dev БД на порту 5433 (чтобы не конфликтовать с локальным/prod Postgres на 5432)
+      - "5433:5432"  # Dev DB on 5433 (avoid clash with local/prod Postgres on 5432)
     environment:
-      POSTGRES_DB: agenthub-dev  # Должно совпадать с Database=... в строке подключения API
+      POSTGRES_DB: agenthub-dev  # Must match Database=... in API connection string
       POSTGRES_USER: agenthub
       POSTGRES_PASSWORD: dev123
     volumes:
@@ -15,7 +15,7 @@ services:
 
   agenthub-api:
     ports:
-      - "5000:8080"  # Dev API на localhost:5000
+      - "5000:8080"  # Dev API on localhost:5000
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ConnectionStrings__AgentHub: "Host=postgres;Port=5432;Database=agenthub-dev;Username=agenthub;Password=dev123"

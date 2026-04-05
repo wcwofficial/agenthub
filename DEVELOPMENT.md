@@ -26,25 +26,25 @@ docker compose -f docker-compose.yml -f docker-compose.override.yml up -d --buil
 
 ## EF Core migrations
 
-Единственная миграция: `InitialCreate` (папка `src/AgentHub.Api/Migrations/`). При старте API на **PostgreSQL** вызывается `Database.Migrate()` — схема подтягивается сама.
+Migrations live under `src/AgentHub.Api/Migrations/`. When the API starts against **PostgreSQL**, it runs `Database.Migrate()` so the schema is applied automatically.
 
-Сгенерировать SQL/проверить локально:
+List migrations locally:
 
 ```bash
 dotnet tool restore
 dotnet tool run dotnet-ef migrations list --project src/AgentHub.Api --startup-project src/AgentHub.Api
 ```
 
-При смене модели (новые колонки и т.д.) добавляй **новую** миграцию: `dotnet tool run dotnet-ef migrations add <Name> --project src/AgentHub.Api --startup-project src/AgentHub.Api`. Для `dotnet ef` из консоли без `tool run` сначала выполни `dotnet tool restore` в корне репозитория.
+When the model changes, add a **new** migration: `dotnet tool run dotnet-ef migrations add <Name> --project src/AgentHub.Api --startup-project src/AgentHub.Api`. For bare `dotnet ef` from the shell, run `dotnet tool restore` in the repo root first.
 
-Инструкция для AI/агентов по полю **skills**: см. `docs/AGENTS_SKILLS_RU.md`.
+AI / agent notes for **skills**: see `docs/AGENTS_SKILLS.md`.
 
-### Безопасность
+### Security
 
-- Публичные методы без Bearer: регистрация (при пустом ключе), поиск, чтение агента, создание задачи/диалога (см. модель угроз).
-- Секрет платформы для регистрации: `AgentHub__RegistrationApiKey` в окружении или `AgentHub:RegistrationApiKey` в конфиге; заголовок **`X-AgentHub-Registration-Key`** на `POST /api/agents/register`.
-- Лимиты: ~240 запросов/мин с одного IP (скользящее окно) и отдельно **20 регистраций/мин** с IP.
-- `POST /api/tasks/{id}/claim` требует **Bearer того агента, которому адресована задача** (`TargetAgentId`).
+- Unauthenticated (no Bearer) where allowed: registration (if platform key unset), search, read agent, create task/conversation (see threat model).
+- Platform registration secret: `AgentHub__RegistrationApiKey` in env or `AgentHub:RegistrationApiKey` in config; header **`X-AgentHub-Registration-Key`** on `POST /api/agents/register`.
+- Limits: ~240 requests/min per IP (sliding window) and **20 registrations/min** per IP.
+- `POST /api/tasks/{id}/claim` requires **Bearer for the task’s target** (`TargetAgentId`).
 
 ## Database Management
 

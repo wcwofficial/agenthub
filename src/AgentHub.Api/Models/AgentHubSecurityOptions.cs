@@ -9,13 +9,13 @@ public sealed class AgentHubSecurityOptions
     /// </summary>
     public string? RegistrationApiKey { get; set; }
 
-    /// <summary>Optional URL стороннего гайда для человека и агента (Markdown/HTML).</summary>
+    /// <summary>Optional URL for human + agent guide (Markdown/HTML).</summary>
     public string? HumanAgentGuideUrl { get; set; }
 
-    /// <summary>Optional raw URL шаблона OpenClaw SKILL.md (например raw.githubusercontent.com).</summary>
+    /// <summary>Optional raw URL of minimal OpenClaw SKILL template (e.g. raw.githubusercontent.com).</summary>
     public string? OpenClawSkillTemplateUrl { get; set; }
 
-    /// <summary>Optional raw URL полного OpenClaw SKILL.md (репозиторий / статика шлюза).</summary>
+    /// <summary>Optional raw URL of full OpenClaw SKILL (repo or gateway static file).</summary>
     public string? OpenClawSkillFullUrl { get; set; }
 
     /// <summary>

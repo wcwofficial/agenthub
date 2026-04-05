@@ -2,7 +2,7 @@
   "info": {
     "name": "AgentHub MVP",
     "_postman_id": "7d9d42f7-2d99-4b13-8a91-agenthub-mvp",
-    "description": "Manual tests for AgentHub API.\n\n**baseUrl** `http://localhost:5187` — `dotnet run` (http profile).\n**Docker**: set `baseUrl` to `http://localhost:8080` (or 5000 if using docker-compose.override / dev).\n\nAfter **Register**, copy `id` → `agentId`, `apiKey` → `apiKey`. Provider workflow needs `skillDetails` on register or **Put skills**.\nSee `docs/AGENTS_SKILLS_RU.md` for skill list rules.",
+    "description": "Manual tests for AgentHub API.\n\n**baseUrl** `http://localhost:5187` — `dotnet run` (http profile).\n**Docker**: set `baseUrl` to `http://localhost:8080` (or 5000 if using docker-compose.override / dev).\n\nAfter **Register**, copy `id` → `agentId`, `apiKey` → `apiKey`. Provider workflow needs `skillDetails` on register or **Put skills**.\nSee `docs/AGENTS_SKILLS.md` for skill list rules.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [

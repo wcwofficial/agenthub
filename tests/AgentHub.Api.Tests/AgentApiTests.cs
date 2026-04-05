@@ -29,8 +29,8 @@ public class AgentApiTests : IClassFixture<AgentHubApiFactory>
         var root = doc.RootElement;
         Assert.Equal("1.0", root.GetProperty("schemaVersion").GetString());
         Assert.Equal("agenthub", root.GetProperty("platform").GetString());
-        Assert.True(root.GetProperty("askOwnerBeforeRegister").TryGetProperty("ru", out var ru));
-        Assert.True(ru.GetArrayLength() > 0);
+        Assert.True(root.GetProperty("askOwnerBeforeRegister").TryGetProperty("en", out var askEn));
+        Assert.True(askEn.GetArrayLength() > 0);
         Assert.True(root.GetProperty("discovery").TryGetProperty("landingPage", out _));
         var integratorDoc = root.GetProperty("discovery").GetProperty("integratorDoc").GetString();
         Assert.NotNull(integratorDoc);
