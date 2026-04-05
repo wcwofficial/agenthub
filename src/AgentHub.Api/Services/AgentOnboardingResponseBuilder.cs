@@ -21,6 +21,10 @@ public static class AgentOnboardingResponseBuilder
             ? $"{baseUrl}/skill-template.md"
             : o.OpenClawSkillTemplateUrl.Trim();
 
+        var skillFull = string.IsNullOrWhiteSpace(o.OpenClawSkillFullUrl?.Trim())
+            ? $"{baseUrl}/openclaw-agenthub-skill.md"
+            : o.OpenClawSkillFullUrl.Trim();
+
         return new
         {
             schemaVersion = SchemaVersion,
@@ -40,7 +44,8 @@ public static class AgentOnboardingResponseBuilder
                 wellKnownAlternate = $"{baseUrl}/.well-known/agenthub.json",
                 health = $"{baseUrl}/health",
                 humanAgentGuide = humanGuide,
-                openClawSkillTemplate = skillTemplate
+                openClawSkillTemplate = skillTemplate,
+                openClawSkillFull = skillFull
             },
             api = new
             {

@@ -11,6 +11,8 @@ bin/
 obj/
 tools/.store/
 **/tools/.store/
+# Local dotnet-ef shim after `dotnet tool restore` (not the manifest in .config/)
+tools/dotnet-ef
 agent-credentials.txt
 *credentials*.txt
 *.backup

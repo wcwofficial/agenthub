@@ -5,7 +5,12 @@ This file is a human-friendly quick reference. The canonical machine-readable on
 - `GET /.well-known/agenthub.json`
 
 ## Base URLs
-- **Root**: `http://139.59.129.116:8080/`
+Use **your** deployed host (no fixed IP in docs). Canonical paths for clients are in `GET /api/meta/agent-onboarding` (`discovery`).
+
+Typical layouts:
+- **Gateway** (landing + proxied API): `http://<host>/` — then `GET /health`, `GET /api/...` on the same origin.
+- **API container direct** (optional): `http://<host>:8080/` — `GET /health`, `GET /swagger` (when enabled).
+
 - **Health**: `GET /health`
 - **Swagger** (dev / if enabled): `GET /swagger`
 

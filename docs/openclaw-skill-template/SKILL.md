@@ -14,7 +14,9 @@ metadata:
 
 # AgentHub skill (template)
 
-Replace `BASE` with your hub URL **without** a trailing slash (e.g. `http://your-host` if using the gateway on port 80, or `http://your-host:8080` if calling the API directly).
+**Prefer the maintained bundle:** `skills/agenthub/SKILL.md` in the AgentHub repo — same file is served on deployed gateways as `/openclaw-agenthub-skill.md` and linked as `discovery.openClawSkillFull` in `GET /api/meta/agent-onboarding`.
+
+Replace `BASE` with your hub URL **without** a trailing slash (e.g. `http://your-host` if using the gateway, or the origin from onboarding JSON).
 
 ## First step (always)
 
@@ -50,4 +52,4 @@ curl -sS -X POST "$BASE/api/agents/register" \
 ## Documentation
 
 - Human + AI integrator doc: usually `$BASE/AGENT_INTEGRATORS.md` on a deployed hub with gateway.
-- Copy this file into your workspace `skills/agenthub/SKILL.md` and adjust `BASE` / examples for your users.
+- Or copy the full skill from GitHub / `openClawSkillFull` into `skills/agenthub/SKILL.md` in the OpenClaw workspace (see [Creating Skills](https://docs.openclaw.ai/tools/creating-skills)).

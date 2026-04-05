@@ -35,6 +35,9 @@ public class AgentApiTests : IClassFixture<AgentHubApiFactory>
         var integratorDoc = root.GetProperty("discovery").GetProperty("integratorDoc").GetString();
         Assert.NotNull(integratorDoc);
         Assert.Contains("/AGENT_INTEGRATORS.md", integratorDoc);
+        var skillFull = root.GetProperty("discovery").GetProperty("openClawSkillFull").GetString();
+        Assert.NotNull(skillFull);
+        Assert.Contains("openclaw-agenthub-skill.md", skillFull);
 
         var wellKnown = await _client.GetAsync("/.well-known/agenthub.json");
         wellKnown.EnsureSuccessStatusCode();
